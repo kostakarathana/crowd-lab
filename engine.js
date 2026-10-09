@@ -216,6 +216,9 @@ export class Simulation {
       const intent = active && a.intent ? a.intent : { x: 0, y: 0, speed: 0 };
       a.ax = (intent.x * intent.speed - a.vx) / a.response;
       a.ay = (intent.y * intent.speed - a.vy) / a.response;
+      const forwardSpeed = a.vx * intent.x + a.vy * intent.y;
+      const shove = (intent.shove || 0) * 18 * Math.max(0, 1 - Math.max(0, forwardSpeed) / Math.max(.1, intent.speed));
+      a.ax += intent.x * shove; a.ay += intent.y * shove;
     }
     for (const a of this.agents) {
       if (a.state === 'exited') continue;
@@ -292,5 +295,5 @@ export class Simulation {
   }
   get remaining() { return this.initialCount - this.evacuated - this.dead; }
   get complete() { return this.agents.every(a => a.state === 'exited' || a.state === 'dead'); }
-  snapshot() { return { model: 'crowd-lab-2.0', scenario: this.scenario, settings: { ...this.settings }, walls: structuredClone(this.walls), exits: structuredClone(this.exits), arrows: structuredClone(this.arrows), guards: this.guards.map(({ x, y }) => ({ x, y })), held: this.held, time: this.time, total: this.initialCount, evacuated: this.evacuated, fallen: this.fallen, injured: this.injured, dead: this.dead, recoveries: this.recoveries, trapped: this.trapped, peakContact: this.peakContact, peakDensity: this.peakDensity, exposure: this.exposure, history: this.history.map(v => ({ ...v })) }; }
+  snapshot() { return { model: 'crowd-lab-2.1', scenario: this.scenario, settings: { ...this.settings }, walls: structuredClone(this.walls), exits: structuredClone(this.exits), arrows: structuredClone(this.arrows), guards: this.guards.map(({ x, y }) => ({ x, y })), held: this.held, time: this.time, total: this.initialCount, evacuated: this.evacuated, fallen: this.fallen, injured: this.injured, dead: this.dead, recoveries: this.recoveries, trapped: this.trapped, peakContact: this.peakContact, peakDensity: this.peakDensity, exposure: this.exposure, history: this.history.map(v => ({ ...v })) }; }
 }

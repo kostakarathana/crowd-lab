@@ -299,7 +299,7 @@ function renderRuns() {
   savedRuns.forEach((run, i) => {
     const tr = document.createElement('tr');
     const cells = [`${String(i + 1).padStart(2, '0')} / ${scenarios[run.scenario].name}`, timeLabel(run.time), `${fmt(run.evacuated)} / ${fmt(run.total)}`, `${Math.round(run.peakContact * 100)}%`, `${run.fallen} / ${run.injured || 0} / ${run.dead}`];
-    cells.forEach((text, n) => { const td = document.createElement('td'); td.textContent = text; if (n === 0) { const small = document.createElement('small'); small.textContent = `Urgency ${run.settings.panic}% · ${run.walls.length} walls · ${run.arrows?.length || 0} arrows · ${run.guards?.length || 0} guards · seed ${run.settings.seed} · ${run.model === 'crowd-lab-2.0' ? 'v2' : 'v1'}`; td.append(small); } tr.append(td); });
+    cells.forEach((text, n) => { const td = document.createElement('td'); td.textContent = text; if (n === 0) { const small = document.createElement('small'); small.textContent = `Urgency ${run.settings.panic}% · ${run.walls.length} walls · ${run.arrows?.length || 0} arrows · ${run.guards?.length || 0} guards · seed ${run.settings.seed} · ${run.model?.startsWith('crowd-lab-2.') ? run.model.replace('crowd-lab-', 'v') : 'v1'}`; td.append(small); } tr.append(td); });
     const td = document.createElement('td'), button = document.createElement('button'); button.textContent = 'Restore ↗'; button.setAttribute('aria-label', `Restore layout and settings for run ${i + 1}`);
     button.onclick = () => { scenario = run.scenario; settings = { ...defaults, ...run.settings }; sim.walls = structuredClone(run.walls); sim.exits = structuredClone(run.exits); sim.arrows = structuredClone(run.arrows || []); sim.guards = structuredClone(run.guards || []); undoStack = []; $('undo').disabled = true; panX = panY = 0; zoom = 1; restart(); changeZoom(1); toast('Restored.'); }; td.append(button); tr.append(td); $('runs-body').append(tr);
   });
@@ -313,7 +313,7 @@ $('save-run').onclick = () => {
   renderRuns();
 };
 $('export-runs').onclick = () => {
-  const blob = new Blob([JSON.stringify({ model: 'crowd-lab-2.0', note: 'Qualitative uncalibrated model. Contact and casualty values are not real-world risk estimates.', runs: savedRuns }, null, 2)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify({ model: 'crowd-lab-2.1', note: 'Qualitative uncalibrated model. Contact and casualty values are not real-world risk estimates.', runs: savedRuns }, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = 'crowd-lab-experiments.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 function frame(now) {

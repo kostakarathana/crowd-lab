@@ -4,6 +4,13 @@ import { visibleSegment } from './navigation.js';
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const angles = [0, -.25, .25, -.5, .5, -.8, .8, -1.1, 1.1];
 
+// User-selected emergency regime, not an empirical threshold for human behavior.
+// Courtesy still varies between people; even courteous agents can shove here.
+export function emergencyDrive(sim, a) {
+  const panic = sim.settings.panic;
+  return panic < 90 || a.escaping ? 0 : (.2 + .8 * clamp((panic - 90) / 10, 0, 1)) * (1 - .35 * a.courtesy);
+}
+
 // Positive time until two moving disks meet; Infinity for diverging trajectories.
 // Karamouzas et al. (2014), supplement S1. We use TTC in a sampled-velocity
 // heuristic, not their force-gradient model. All tuning is documented in RESEARCH.md.
@@ -83,7 +90,8 @@ export function planMotion(sim, a, route) {
   if (route.trapped || (!route.x && !route.y)) return { x: 0, y: 0, speed: 0 };
   const direction = companionPreference(sim, a, route);
   const urgency = sim.settings.panic / 100, speed = preferredSpeed(sim, a) * direction.pace;
-  const horizon = 2.4 - .7 * urgency;
+  const emergency = emergencyDrive(sim, a);
+  const horizon = (2.4 - .7 * urgency) * (1 - .45 * emergency);
   const reach = Math.min(6, Math.max(3, speed * horizon));
   const neighbors = [];
   sim.neighbors(a, b => {
@@ -96,11 +104,9 @@ export function planMotion(sim, a, route) {
   // Bounded local attention keeps large venues interactive. Closest bodies occlude
   // more distant interactions in dense queues; this is an approximation, not a law.
   if (neighbors.length > 24) { neighbors.sort((x, y) => x.distance2 - y.distance2); neighbors.length = 24; }
-  const headway = a.headway * (1 - .35 * urgency) * (.75 + .35 * a.courtesy);
-  // Competitive agents tolerate a small amount of pushing. Urgency alone does
-  // not turn the whole population into non-cooperative particles.
-  const push = 1.2 * urgency * urgency * (1 - a.courtesy);
-  const padding = .035 + .09 * a.courtesy * (1 - .5 * urgency) + .12 * a.caution * (1 - .8 * urgency);
+  const headway = a.headway * (1 - .35 * urgency) * (.75 + .35 * a.courtesy) * (1 - .65 * emergency);
+  const push = 1.2 * urgency * urgency * (1 - a.courtesy) + 3 * emergency;
+  const padding = (.035 + .09 * a.courtesy * (1 - .5 * urgency) + .12 * a.caution * (1 - .8 * urgency)) * (1 - .85 * emergency);
   let best = null, bestScore = Infinity;
   for (const angle of angles) {
     const co = Math.cos(angle), si = Math.sin(angle);
@@ -123,12 +129,16 @@ export function planMotion(sim, a, route) {
     // Prefer continuing a chosen sidestep over oscillating left and right.
     const score = (1 - Math.cos(angle)) * 1.4 + Math.abs(angle - a.turn) * .12
       + (speed - Math.min(speed, allowed)) / speed
-      + (collision < horizon ? .9 * (1 - collision / horizon) : 0)
+      + (collision < horizon ? .9 * (1 - .8 * emergency) * (1 - collision / horizon) : 0)
       + (angle < 0 ? .004 : 0);
     if (score < bestScore) { bestScore = score; best = { x: dx, y: dy, speed: Math.max(0, allowed), angle }; }
   }
   // At a tight corner the graph waypoint is safer than an arbitrary sampled turn.
   if (!best) best = { x: route.x, y: route.y, speed: Math.min(speed, .35), angle: 0 };
+  // Extra drive only near a standing person ahead. Existing equal/opposite body
+  // forces transmit the shove; nobody is teleported or assigned fake pressure.
+  best.shove = emergency && best.speed > .1 && neighbors.some(({ b, distance2 }) => isMobile(b) && distance2 < .85 ** 2
+    && (b.x - a.x) * best.x + (b.y - a.y) * best.y > 0) ? emergency : 0;
   a.turn = best.angle; a.yielding = best.speed < speed * .65;
   return best;
 }

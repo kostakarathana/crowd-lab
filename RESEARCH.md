@@ -1,6 +1,6 @@
 # Crowd Lab: evidence and model decisions
 
-Research revision: 9 October 2026. Model: `crowd-lab-2.0`.
+Research revision: 9 October 2026. Model: `crowd-lab-2.1`.
 
 This is a research-informed, browser-based agent simulation. It is **not a reproduction or validated combination of the papers below**, and it is not a trained neural network. Each person has a route, local perception, a sampled movement planner, individual traits, companions, memory, and behavioral states. These decisions run locally, with no API keys or external AI service.
 
@@ -9,7 +9,7 @@ The review covers **23 research papers**, from foundational models through 2025 
 ## What changed
 
 1. **Anticipation before contact.** Predict potential collisions from relative velocities. Compare nine walking directions, keep a speed-dependent gap, and brake before reaching a queue. Physical contact is a separate layer: a person trying to stop can still be displaced by others.
-2. **Urgency and cooperation are separate.** The former changes preferred speed, headway, and exit commitment. The latter changes personal space and willingness to push into a gap. An emergency does not make all agents selfish. The old hard 90% cutoff for self-preservation was removed. Urgent people still mostly pursue exits; severe sustained compression can override that fixation.
+2. **Urgency and cooperation are separate.** The former changes preferred speed, headway, and exit commitment. The latter changes personal space and willingness to push into a gap. At 90%+ the user-selected emergency regime additionally reduces braking and increases shoving, even for courteous agents; individual traits still vary. This is a scenario assumption, not a research-derived threshold. The old hard 90% cutoff for self-preservation was removed. Urgent people still mostly pursue exits; severe sustained compression can override that fixation.
 3. **Individual exit decisions.** Compare walking distance with remembered visible queue conditions. Commit to a choice for a while; require a meaningful improvement before switching. Queue observations are wall-occluded and expire gradually. There is no automatic global knowledge of every exit queue.
 4. **Companions.** Nearby pairs and trios share an initial exit preference, gently stay together, and briefly slow for a visible lagging partner. Cohesion weakens with urgency and is suspended in compression. They can separate; no invisible tether or permanent waiting.
 5. **Varied response option.** An optional right-skewed response delay replaces simultaneous departure. This is separate from exact staged releases. It illustrates delayed response without pretending to model a specific alarm, hazard, or building population.
@@ -54,10 +54,12 @@ Operational context: HSE guidance separates [arrival, circulation and departure 
 - Fixed integration step: 0.025 s. Behavioral decisions every 0.15–0.20 s, varied by agent ID; response relaxation independently sampled in 0.4–0.6 s.
 - Nominal free speed: `1.3 + 2.2 × urgency²` m/s, with seeded individual variation; injured walkers use 55%. The calm nominal value is consistent in scale with the walking speeds used in the literature, but the urgency curve is our choice.
 - Nine headings relative to the route: 0, ±0.25, ±0.5, ±0.8, ±1.1 radians. Candidate cost combines deviation, turn continuity, reduced progress and predicted collision time. This is an original reduced hybrid, not the exact Moussaïd or Karamouzas algorithm.
-- Perception reaches 3–6 m, bounded by speed and a 1.7–2.4 s horizon. Bodies behind the agent are excluded from visual planning; walls occlude observations. At most 24 nearest visible bodies are considered for performance. Body-to-body occlusion is not explicitly ray-traced.
+- Perception reaches 3–6 m, bounded by speed and a base 1.7–2.4 s horizon, shortened by emergency drive. Bodies behind the agent are excluded from visual planning; walls occlude observations. At most 24 nearest visible bodies are considered for performance. Body-to-body occlusion is not explicitly ray-traced.
 - Headway starts at 0.75–1.15 s, modified continuously by urgency and courtesy. Motion is bounded by the gap to bodies ahead, with a small allowance for a moving leader. Competitive urgent agents retain up to 1.2 m/s desired drive into a queue; physical forces determine actual movement. Personal-space padding also grows after a compression experience.
 - Disk radii remain 0.215–0.25 m. Overlap contact stiffness, friction and wall repulsion remain illustrative. Pair forces cannot cross drawn walls. Hard wall containment remains; maximum speed/acceleration limits are numerical safeguards, not measured human limits.
 - Headway affects **desired** motion. External pushing is not artificially zeroed when somebody waits, follows a guard or brakes. Downed bodies remain obstacles.
+
+At urgency below 90%, movement is unchanged from model 2.0. At 90–100%, emergency drive is `E = (0.2 + 0.8 × (urgencyPercent − 90) / 10) × (1 − 0.35 × courtesy)`, or zero while seeking relief. Headway is multiplied by `1 − 0.65E`, personal-space padding by `1 − 0.85E`, anticipation horizon by `1 − 0.45E`, and collision cost by `1 − 0.8E`. Standing-body push allowance gains `3E` m/s (still capped by preferred speed). Near a visible standing person ahead within 0.85 m, forward acceleration gains up to `18E` model m/s², diminishing as forward speed reaches desired speed. This is an illustrative force scale, not measured human force. Existing equal/opposite contact forces transmit displacement and compression; contact scores are never assigned artificially. There is no extra drive when stopped, held by a guard, retreating, or braking for a fallen body. These coefficients and the 90% threshold are explicit sandbox choices requested for an extreme competitive emergency scenario.
 
 ### Exit decisions and groups
 
@@ -70,7 +72,7 @@ Operational context: HSE guidance separates [arrival, circulation and departure 
 
 ### Compression, control and health
 
-- Urgency continuously suppresses voluntary retreat; a minority remain responsive at maximum urgency. Severe accumulated distress can trigger relief-seeking for anyone. There is no sharp 90% switch. A retreat, once started, can finish before exit-seeking resumes.
+- Urgency continuously suppresses voluntary retreat; a minority remain responsive at maximum urgency. Severe accumulated distress can trigger relief-seeking for anyone. There is no hard 90% cutoff for self-preservation; the separate emergency shoving regime begins at 90%. A retreat, once started, can finish before exit-seeking resumes.
 - Agents seek reachable lower-density space, avoid a denser band en route, regroup briefly and retain slowly fading caution. Thresholds are designed behavior, not measured probabilities of panic or self-preservation.
 - Guards retain wall-limited local metering, upstream-pressure relief, bounded six-second holds and shared capacity. They cannot freeze bodies against physical compression. Capacity and compliance need real-world calibration; communication quality, visibility over heads and guard movement are omitted.
 - Arrows retain the user-requested 85% encounter response and approximately equal odds at equal density. Their red 4.5 m radius is wall-clipped. The setting is not an empirical sign-detection rate.

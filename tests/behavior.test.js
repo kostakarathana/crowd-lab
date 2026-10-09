@@ -17,12 +17,40 @@ function pair(panic = 0, walls = []) {
   Object.assign(s.agents[1], { x: 20.9, y: 15, start: 100 });
   s.buildHash(); return s;
 }
-test('people anticipate a stationary person before contact, even at maximum urgency', () => {
-  for (const panic of [0, 100]) {
+test('below the emergency threshold people anticipate a stationary person before contact', () => {
+  for (const panic of [0, 89]) {
     const s = pair(panic), a = s.agents[0], intent = planMotion(s, a, { x: 1, y: 0 });
     assert.equal(a.contact, 0);
     assert.ok(intent.speed < preferredSpeed(s, a) * .8 || Math.abs(intent.y) > .4);
   }
+});
+test('90%+ emergency shoves displace a waiting person and escalate toward maximum urgency', () => {
+  const samples = [];
+  for (const panic of [89, 90, 95, 100]) {
+    const s = pair(panic, [{ ax: 15, ay: 14.65, bx: 30, by: 14.65 }, { ax: 15, ay: 15.35, bx: 30, by: 15.35 }]);
+    // Isolate physical queue behavior from global path choice in a narrow lane.
+    s.navigate = () => ({ x: 1, y: 0, trapped: false });
+    let contact = 0;
+    for (let i = 0; i < 3 / DT; i++) { s.step(); contact = Math.max(contact, s.agents[1].contact); }
+    samples.push({ displacement: s.agents[1].x - 20.9, contact });
+    assert.ok(s.agents.every(a => Number.isFinite(a.x) && a.y > 14.65 && a.y < 15.35));
+    assert.equal(s.agents[1].intent, null, 'waiting person has no self-propelled motion');
+  }
+  assert.equal(samples[0].contact, 0);
+  for (let i = 1; i < samples.length; i++) {
+    assert.ok(samples[i].displacement > samples[i - 1].displacement * 1.4, JSON.stringify(samples));
+    assert.ok(samples[i].contact > samples[i - 1].contact, JSON.stringify(samples));
+  }
+});
+test('emergency agents still brake for fallen bodies and stop shoving during retreat', () => {
+  const s = pair(100, [{ ax: 15, ay: 14.65, bx: 25, by: 14.65 }, { ax: 15, ay: 15.35, bx: 25, by: 15.35 }]);
+  const [a, b] = s.agents;
+  Object.assign(b, { x: 20.45, state: 'fallen', down: true }); s.buildHash();
+  const stopped = planMotion(s, a, { x: 1, y: 0 });
+  assert.equal(stopped.shove, 0); assert.ok(stopped.speed < .1);
+  Object.assign(b, { state: 'moving', down: false });
+  a.escaping = true;
+  assert.equal(planMotion(s, a, { x: 1, y: 0 }).shove, 0);
 });
 test('queue headway slows people when a corridor prevents passing', () => {
   const s = pair(0, [{ ax: 15, ay: 14.65, bx: 25, by: 14.65 }, { ax: 15, ay: 15.35, bx: 25, by: 15.35 }]);

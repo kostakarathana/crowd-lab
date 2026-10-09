@@ -1,5 +1,5 @@
 {
-  "model": "crowd-lab-2.0",
+  "model": "crowd-lab-2.1",
   "note": "Synthetic regression scenarios; no calibration to trajectory data.",
   "results": [
     {
@@ -26,13 +26,13 @@
       "seed": 42,
       "evacuated": 200,
       "total": 200,
-      "elapsed": 64.25,
-      "t10": 7.45,
-      "t90": 57.325,
-      "centralFlow": 3.208020050125313,
-      "freeSpeed": 2.5615536276592623,
-      "peakContact": 0.1344782565271167,
-      "peakDensity": 3.819718634205488
+      "elapsed": 25.775000000000002,
+      "t10": 4.525,
+      "t90": 21.85,
+      "centralFlow": 9.235209235209235,
+      "freeSpeed": 3.3991469402884915,
+      "peakContact": 0.999931066776135,
+      "peakDensity": 6.366197723675814
     },
     {
       "name": "urgent-competitive",
@@ -42,13 +42,13 @@
       "seed": 42,
       "evacuated": 200,
       "total": 200,
-      "elapsed": 39.675000000000004,
-      "t10": 6.175000000000001,
-      "t90": 34.875,
-      "centralFlow": 5.574912891986063,
-      "freeSpeed": 3.1348060595779996,
-      "peakContact": 0.7664861555695556,
-      "peakDensity": 6.366197723675814
+      "elapsed": 21.125,
+      "t10": 4.1000000000000005,
+      "t90": 14.4,
+      "centralFlow": 15.53398058252427,
+      "freeSpeed": 3.4263099798000503,
+      "peakContact": 0.9999349040345508,
+      "peakDensity": 5.729577951308232
     },
     {
       "name": "wider-exit",
@@ -90,13 +90,13 @@
       "seed": 71,
       "evacuated": 200,
       "total": 200,
-      "elapsed": 62.95,
-      "t10": 7.550000000000001,
-      "t90": 56.725,
-      "centralFlow": 3.2536858159633963,
-      "freeSpeed": 2.5889692072759427,
-      "peakContact": 0.12751882252477056,
-      "peakDensity": 3.819718634205488
+      "elapsed": 25.35,
+      "t10": 4.2,
+      "t90": 18.775000000000002,
+      "centralFlow": 10.977701543739277,
+      "freeSpeed": 3.3936448918742377,
+      "peakContact": 0.9983601967596154,
+      "peakDensity": 6.366197723675814
     },
     {
       "name": "urgent-competitive",
@@ -106,13 +106,13 @@
       "seed": 71,
       "evacuated": 200,
       "total": 200,
-      "elapsed": 41.325,
-      "t10": 5.925000000000001,
-      "t90": 36.575,
-      "centralFlow": 5.220228384991843,
-      "freeSpeed": 3.1172502792534504,
-      "peakContact": 0.6893871642966188,
-      "peakDensity": 6.047887837492023
+      "elapsed": 18.150000000000002,
+      "t10": 3.825,
+      "t90": 13.65,
+      "centralFlow": 16.28498727735369,
+      "freeSpeed": 3.368384277004763,
+      "peakContact": 0.9910622168805419,
+      "peakDensity": 5.092958178940651
     },
     {
       "name": "wider-exit",
@@ -154,13 +154,13 @@
       "seed": 113,
       "evacuated": 200,
       "total": 200,
-      "elapsed": 64.875,
-      "t10": 8.125,
-      "t90": 57.525000000000006,
-      "centralFlow": 3.238866396761133,
-      "freeSpeed": 2.5731678249608962,
-      "peakContact": 0.11656246340881296,
-      "peakDensity": 4.138028520389279
+      "elapsed": 25.3,
+      "t10": 4.3500000000000005,
+      "t90": 19.575000000000003,
+      "centralFlow": 10.50903119868637,
+      "freeSpeed": 3.3409972783696924,
+      "peakContact": 0.9986539600330983,
+      "peakDensity": 6.366197723675814
     },
     {
       "name": "urgent-competitive",
@@ -170,12 +170,12 @@
       "seed": 113,
       "evacuated": 200,
       "total": 200,
-      "elapsed": 41.675000000000004,
-      "t10": 5.825,
-      "t90": 37.025,
-      "centralFlow": 5.128205128205129,
-      "freeSpeed": 3.1215035318201,
-      "peakContact": 0.8240838990905525,
+      "elapsed": 17.05,
+      "t10": 3.975,
+      "t90": 13.575000000000001,
+      "centralFlow": 16.666666666666664,
+      "freeSpeed": 3.385992295818433,
+      "peakContact": 0.9904460375391579,
       "peakDensity": 6.047887837492023
     },
     {
