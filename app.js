@@ -1,3 +1,4 @@
+import { visibilityPolygon } from './visibility.js';
 import { Simulation, scenarios, defaults, DT, clamp, distanceToWall } from './engine.js';
 
 const $ = id => document.getElementById(id);
@@ -104,7 +105,7 @@ canvas.addEventListener('pointermove', event => {
     for (const a of sim.agents) { if (a.state === 'exited') continue; const d = Math.hypot(a.x - p.x, a.y - p.y); if (d < nearest) { hovered = a; nearest = d; } }
   }
   if (hovered) {
-    const state = hovered.state === 'moving' ? hovered.trapped ? 'No route to exit' : sim.time < hovered.start ? 'Waiting for release' : hovered.waiting ? 'Waiting for space' : hovered.arrow >= 0 ? 'Following exit arrow' : 'Moving to exit' : hovered.state === 'fallen' ? 'Fallen · illustrative' : 'Dead · illustrative';
+    const state = hovered.state === 'moving' ? hovered.trapped ? 'No route to exit' : sim.time < hovered.start ? 'Waiting for release' : hovered.waiting ? 'Waiting for space' : hovered.arrow >= 0 ? 'Following exit arrow' : 'Moving to exit' : hovered.state === 'fallen' ? 'Fallen' : hovered.state === 'injured' ? hovered.down ? 'Injured · down' : 'Injured · walking' : 'Dead';
     $('inspection').innerHTML = `<b>PERSON ${hovered.id + 1} · ${state}</b>Local density ${hovered.density.toFixed(1)} people / m²<br>Contact index ${Math.round(hovered.contact * 100)}% · Speed ${Math.hypot(hovered.vx, hovered.vy).toFixed(1)} m/s`;
     $('inspection').hidden = false;
   } else $('inspection').hidden = true;
@@ -169,9 +170,17 @@ document.addEventListener('visibilitychange', () => { if (document.hidden && run
 function pressureColor(value) { return value < .18 ? '#bbd7a3' : value < .35 ? '#d4d394' : value < .55 ? '#e4c373' : value < .73 ? '#e9a264' : value < .88 ? '#e37b58' : '#df5552'; }
 function drawArrow(s, preview = false) {
   const angle = Math.atan2(s.by - s.ay, s.bx - s.ax), head = Math.min(.8, Math.hypot(s.bx - s.ax, s.by - s.ay) * .3);
-  ctx.save(); ctx.strokeStyle = preview ? '#c2fff6' : '#73cfcd'; ctx.lineWidth = preview ? .16 : .22; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.save(); ctx.strokeStyle = preview ? '#ffb5b2' : '#ff6868'; ctx.lineWidth = preview ? .16 : .22; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   ctx.beginPath(); ctx.moveTo(s.ax, s.ay); ctx.lineTo(s.bx, s.by); ctx.moveTo(s.bx - Math.cos(angle - .6) * head, s.by - Math.sin(angle - .6) * head); ctx.lineTo(s.bx, s.by); ctx.lineTo(s.bx - Math.cos(angle + .6) * head, s.by - Math.sin(angle + .6) * head); ctx.stroke();
-  ctx.fillStyle = '#73cfcd'; ctx.beginPath(); ctx.arc(s.ax, s.ay, .2, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+  ctx.fillStyle = '#ff6868'; ctx.beginPath(); ctx.arc(s.ax, s.ay, .2, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+}
+function drawSignRange(points) {
+  if (!points.length) return;
+  ctx.save(); ctx.beginPath(); ctx.rect(0, 0, sim.w, sim.h); ctx.clip();
+  ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+  ctx.closePath(); ctx.fillStyle = '#ff545418'; ctx.fill();
+  ctx.strokeStyle = '#ff686899'; ctx.lineWidth = .09; ctx.stroke(); ctx.restore();
 }
 function draw() {
   if (!cw || !ch) return;
@@ -200,15 +209,17 @@ function draw() {
     for (const a of sim.agents) { if (a.state === 'exited') continue; const v = view === 'density' ? a.density / 6 : a.contact; if (v < .2) continue; const x = Math.floor(a.x), y = Math.floor(a.y), key = x + y * 1000, prior = heat.get(key); if (!prior || prior.v < v) heat.set(key, { x, y, v }); }
     heat.forEach(({ x, y, v }) => { ctx.globalAlpha = .07 + Math.min(v, 1) * .16; ctx.fillStyle = pressureColor(v); ctx.fillRect(x, y, 1, 1); }); ctx.globalAlpha = 1;
   }
+  for (const points of sim.signRanges) drawSignRange(points);
+  if (drawing && tool === 'arrow') drawSignRange(visibilityPolygon({ ax: drawing.start.x, ay: drawing.start.y }, sim.signWalls));
   for (const a of sim.agents) {
     if (a.state === 'exited') continue;
     if (a.x * scale + originX < -10 || a.x * scale + originX > cw + 10 || a.y * scale + originY < -10 || a.y * scale + originY > ch + 10) continue;
     if (a.state === 'dead') { ctx.strokeStyle = '#d66861'; ctx.lineWidth = .08; ctx.beginPath(); ctx.moveTo(a.x - .17, a.y - .17); ctx.lineTo(a.x + .17, a.y + .17); ctx.moveTo(a.x + .17, a.y - .17); ctx.lineTo(a.x - .17, a.y + .17); ctx.stroke(); continue; }
     const value = view === 'density' ? a.density / 6 : a.contact;
-    ctx.fillStyle = a.state === 'fallen' ? '#e4985d' : view === 'people' && value < .18 ? colors[Math.floor(a.hue * colors.length)] : pressureColor(value);
+    ctx.fillStyle = a.state === 'fallen' ? '#e4985d' : a.state === 'injured' ? '#f4798d' : view === 'people' && value < .18 ? colors[Math.floor(a.hue * colors.length)] : pressureColor(value);
     ctx.globalAlpha = sim.time < a.start && sim.time > 0 ? .32 : a.waiting ? .55 : .9;
     ctx.beginPath(); ctx.arc(a.x, a.y, a.radius * .83, 0, Math.PI * 2); ctx.fill();
-    if (a.state === 'fallen') { ctx.strokeStyle = '#fbd7a8'; ctx.lineWidth = .045; ctx.beginPath(); ctx.arc(a.x, a.y, a.radius + .08, 0, Math.PI * 2); ctx.stroke(); }
+    if (a.state === 'fallen' || (a.state === 'injured' && a.down)) { ctx.strokeStyle = a.state === 'injured' ? '#ffc1ce' : '#fbd7a8'; ctx.lineWidth = .045; ctx.beginPath(); ctx.arc(a.x, a.y, a.radius + .08, 0, Math.PI * 2); ctx.stroke(); }
   }
   ctx.globalAlpha = 1;
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
@@ -252,7 +263,7 @@ function updateUI() {
   $('status-text').textContent = state; document.querySelector('.canvas-status').classList.toggle('running', running);
   $('play-icon').textContent = running ? 'Ⅱ' : '▶'; $('play-label').textContent = running ? 'Pause' : sim.complete ? 'Restart' : sim.time > 0 ? 'Resume' : 'Start';
   $('sim-time').textContent = timeLabel(sim.time); $('evacuated').textContent = fmt(sim.evacuated); $('total-count').textContent = `/ ${fmt(sim.initialCount)}`;
-  $('flow').textContent = (sim.flow || 0).toFixed(1); $('density').textContent = sim.peakDensity.toFixed(1); $('fallen').textContent = fmt(sim.fallen); $('dead').textContent = fmt(sim.dead);
+  $('flow').textContent = (sim.flow || 0).toFixed(1); $('density').textContent = sim.peakDensity.toFixed(1); $('fallen').textContent = fmt(sim.fallen); $('injured').textContent = fmt(sim.injured); $('dead').textContent = fmt(sim.dead);
   $('evacuation-progress').style.width = `${sim.evacuated / sim.initialCount * 100}%`;
   $('exit-info').textContent = `${sim.exits.length} exit${sim.exits.length === 1 ? '' : 's'}`;
   $('route-warning').hidden = !sim.trapped;
@@ -264,7 +275,7 @@ function renderRuns() {
   $('runs-section').hidden = !savedRuns.length; $('runs-body').replaceChildren();
   savedRuns.forEach((run, i) => {
     const tr = document.createElement('tr');
-    const cells = [`${String(i + 1).padStart(2, '0')} / ${scenarios[run.scenario].name}`, timeLabel(run.time), `${fmt(run.evacuated)} / ${fmt(run.total)}`, `${Math.round(run.peakContact * 100)}%`, `${run.fallen} / ${run.dead}`];
+    const cells = [`${String(i + 1).padStart(2, '0')} / ${scenarios[run.scenario].name}`, timeLabel(run.time), `${fmt(run.evacuated)} / ${fmt(run.total)}`, `${Math.round(run.peakContact * 100)}%`, `${run.fallen} / ${run.injured || 0} / ${run.dead}`];
     cells.forEach((text, n) => { const td = document.createElement('td'); td.textContent = text; if (n === 0) { const small = document.createElement('small'); small.textContent = `Panic ${run.settings.panic}% · ${run.walls.length} walls · ${run.arrows?.length || 0} arrows · seed ${run.settings.seed}`; td.append(small); } tr.append(td); });
     const td = document.createElement('td'), button = document.createElement('button'); button.textContent = 'Restore ↗'; button.setAttribute('aria-label', `Restore layout and settings for run ${i + 1}`);
     button.onclick = () => { scenario = run.scenario; settings = { ...defaults, ...run.settings }; sim.walls = structuredClone(run.walls); sim.exits = structuredClone(run.exits); sim.arrows = structuredClone(run.arrows || []); undoStack = []; $('undo').disabled = true; panX = panY = 0; zoom = 1; restart(); changeZoom(1); toast('Restored.'); }; td.append(button); tr.append(td); $('runs-body').append(tr);
@@ -279,7 +290,7 @@ $('save-run').onclick = () => {
   renderRuns();
 };
 $('export-runs').onclick = () => {
-  const blob = new Blob([JSON.stringify({ model: 'crowd-lab-1.1', note: 'Qualitative uncalibrated model. Contact and casualty values are not real-world risk estimates.', runs: savedRuns }, null, 2)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify({ model: 'crowd-lab-1.2', note: 'Qualitative uncalibrated model. Contact and casualty values are not real-world risk estimates.', runs: savedRuns }, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = 'crowd-lab-experiments.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 function frame(now) {

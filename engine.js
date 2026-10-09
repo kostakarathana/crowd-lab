@@ -1,4 +1,6 @@
-import { FlowField, chooseArrow, visibleSegment } from './navigation.js';
+import { canSeeSign, sightWalls, visibilityPolygon } from './visibility.js';
+import { FlowField, chooseArrow } from './navigation.js';
+import { isMobile, updateHealth } from './health.js';
 export { FlowField } from './navigation.js';
 // A qualitative social-force-inspired model, not a calibrated life-safety solver.
 export const DT = 1 / 40;
@@ -34,12 +36,12 @@ export class Simulation {
     this.scenario = scenario; this.venue = scenarios[scenario]; this.settings = { ...defaults, count: this.venue.count, panic: this.venue.panic, width: this.venue.exits[0].width, ...settings };
     this.w = this.venue.w; this.h = this.venue.h;
     this.walls = structuredClone(layout?.walls ?? this.venue.walls); this.exits = structuredClone(layout?.exits ?? this.venue.exits); this.arrows = structuredClone(layout?.arrows ?? []);
-    this.time = 0; this.tick = 0; this.evacuated = 0; this.fallen = 0; this.dead = 0; this.trapped = 0; this.peakContact = 0; this.peakDensity = 0; this.exposure = 0;
+    this.time = 0; this.tick = 0; this.evacuated = 0; this.fallen = 0; this.injured = 0; this.dead = 0; this.recoveries = 0; this.trapped = 0; this.peakContact = 0; this.peakDensity = 0; this.exposure = 0;
     this.history = []; this.exitTimes = []; this.exitCounts = this.exits.map(() => 0); this.agents = []; this.hash = new Map(); this.bucketSize = 1.2;
-    this.navigationRng = random(this.settings.seed ^ 0x1234abcd); this.routeVersion = 0; this.bodyCount = 0;
+    this.navigationRng = random(this.settings.seed ^ 0x1234abcd); this.healthRng = random(this.settings.seed ^ 0x76543210); this.routeVersion = 0; this.bodyCount = 0; this.routingDirty = false;
     this.rebuild(); this.populate(); this.updateRouting(); this.measure();
   }
-  rebuild() { this.solids = [...boundaryWalls(this.w, this.h, this.exits), ...this.walls]; this.field = new FlowField(this.w, this.h, this.solids, this.exits); this.geometry = this.field.geometry; this.arrowFields = new Map(); }
+  rebuild() { this.solids = [...boundaryWalls(this.w, this.h, this.exits), ...this.walls]; this.field = new FlowField(this.w, this.h, this.solids, this.exits); this.geometry = this.field.geometry; this.arrowFields = new Map(); this.signWalls = sightWalls(this.solids); this.signRanges = this.arrows.map(s => visibilityPolygon(s, this.signWalls)); }
   updateRouting() {
     this.densityCols = Math.ceil(this.w / 1.5); this.densityRows = Math.ceil(this.h / 1.5);
     this.occupancy = new Float32Array(this.densityCols * this.densityRows);
@@ -48,14 +50,14 @@ export class Simulation {
       if (a.state === 'exited') continue;
       const x = clamp(Math.floor(a.x / 1.5), 0, this.densityCols - 1), y = clamp(Math.floor(a.y / 1.5), 0, this.densityRows - 1);
       this.occupancy[y * this.densityCols + x]++;
-      if (a.state !== 'moving') obstacles.push({ x: a.x, y: a.y, radius: a.radius });
+      if (!isMobile(a)) obstacles.push({ x: a.x, y: a.y, radius: a.radius });
     }
     const costs = new Float32Array(this.field.cols * this.field.rows);
     const avoidance = .12 + 3.5 * (1 - this.settings.panic / 100) ** 2;
     for (let i = 0; i < costs.length; i++) { const p = this.field.center(i); costs[i] = 1 + Math.min(12, this.routeDensity(p.x, p.y) * avoidance); }
     this.field = new FlowField(this.w, this.h, this.solids, this.exits, { geometry: this.geometry, costs, obstacles });
-    if (obstacles.length !== this.bodyCount) this.arrowFields.clear();
-    this.bodyCount = obstacles.length; this.routeVersion++;
+    if (obstacles.length !== this.bodyCount || this.routingDirty) this.arrowFields.clear();
+    this.bodyCount = obstacles.length; this.routingDirty = false; this.routeVersion++;
   }
   routeDensity(x, y) {
     const cx = Math.floor(x / 1.5), cy = Math.floor(y / 1.5); let total = 0, cells = 0;
@@ -76,8 +78,8 @@ export class Simulation {
     const candidates = [];
     for (let i = 0; i < this.arrows.length; i++) {
       const s = this.arrows[i];
-      if (a.signVisited[i] || (a.signMemory[i] || 0) > this.time || Math.hypot(a.x - s.ax, a.y - s.ay) > 4.5) continue;
-      if (!visibleSegment(a.x, a.y, s.ax, s.ay, this.solids, .02)) continue;
+      if (a.signVisited[i] || (a.signMemory[i] || 0) > this.time) continue;
+      if (!canSeeSign(a.x, a.y, s, this.signWalls)) continue;
       const field = this.arrowField(i);
       if (!field || field.nearest(a.x, a.y) < 0) continue;
       // Sample the indicated corridor, not just the shared location of two signs.
@@ -142,7 +144,7 @@ export class Simulation {
     for (let i = cells.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [cells[i], cells[j]] = [cells[j], cells[i]]; }
     const count = Math.min(this.settings.count, cells.length);
     for (let i = 0; i < count; i++) {
-      const p = cells[i]; this.agents.push({ id: i, x: p.x + (rng() - .5) * .10, y: p.y + (rng() - .5) * .10, vx: 0, vy: 0, ax: 0, ay: 0, radius: .215 + rng() * .035, factor: .7 + rng() * .6, start: this.settings.release ? i / this.settings.release : rng() * 2, state: 'moving', contact: 0, rawContact: 0, dose: 0, density: 0, trapped: false, hue: rng() });
+      const p = cells[i]; this.agents.push({ id: i, x: p.x + (rng() - .5) * .10, y: p.y + (rng() - .5) * .10, vx: 0, vy: 0, ax: 0, ay: 0, radius: .215 + rng() * .035, factor: .7 + rng() * .6, start: this.settings.release ? i / this.settings.release : rng() * 2, state: 'moving', down: false, safeTime: 0, contact: 0, rawContact: 0, dose: 0, density: 0, trapped: false, hue: rng() });
     }
     this.initialCount = count;
     for (const a of this.agents) Object.assign(a, { arrow: -1, arrowUntil: 0, nextSignRead: 0, signMemory: {}, signVisited: {}, waypoint: null, repathAt: 0, routeVersion: -1, progressAt: 1, progressX: a.x, progressY: a.y, stalled: 0, waitUntil: 0, nextWaitCheck: 0, waiting: false });
@@ -155,20 +157,37 @@ export class Simulation {
     const x = Math.floor(a.x / this.bucketSize), y = Math.floor(a.y / this.bucketSize);
     for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) { const list = this.hash.get(x + ox + (y + oy) * 10000); if (list) for (const b of list) callback(b); }
   }
+  canStand(a) {
+    if (a.contact >= .25 || a.density >= 4) return false;
+    if (this.solids.some(s => distanceToWall(a.x, a.y, s) < a.radius + .06)) return false;
+    let space = true;
+    this.neighbors(a, b => { if (a !== b && Math.hypot(a.x - b.x, a.y - b.y) < (a.radius + b.radius) * .95) space = false; });
+    return space;
+  }
+  advanceHealth(a, dt) {
+    const previous = a.state, mobile = isMobile(a);
+    const recovered = updateHealth(a, dt, this.healthRng, (a.state === 'fallen' || (a.state === 'injured' && a.down)) && this.canStand(a));
+    for (const state of ['fallen', 'injured', 'dead']) this[state] += Number(a.state === state) - Number(previous === state);
+    if (mobile !== isMobile(a)) this.routingDirty = true;
+    if (recovered) {
+      this.recoveries++; a.waypoint = null; a.arrow = -1; a.waiting = false; a.waitUntil = 0; a.stalled = 0;
+      a.progressX = a.x; a.progressY = a.y; a.progressAt = this.time + 1;
+    }
+  }
   step() {
     const dt = DT;
     this.tick++; this.time = this.tick * DT;
     const urgency = this.settings.panic / 100, friction = this.settings.friction / 100;
     this.buildHash();
-    if (this.tick % 80 === 0) this.updateRouting();
+    if ((this.routingDirty && this.tick % 10 === 0) || this.tick % 80 === 0) this.updateRouting();
     for (const a of this.agents) {
       if (a.state === 'exited') continue;
       a.rawContact = 0; a.ax = 0; a.ay = 0;
-      if (a.state !== 'moving') continue;
+      if (!isMobile(a)) continue;
       const direction = this.navigate(a); a.trapped = direction.trapped;
       a.waiting = this.shouldWait(a, direction);
       const variation = 1 + (a.factor - 1) * this.settings.variation / 35;
-      const desired = this.time >= a.start && !a.waiting ? (.95 + 3.5 * urgency * urgency) * variation : 0;
+      const desired = this.time >= a.start && !a.waiting ? (.95 + 3.5 * urgency * urgency) * variation * (a.state === 'injured' ? .55 : 1) : 0;
       a.ax = (direction.x * desired - a.vx) / .5;
       a.ay = (direction.y * desired - a.vy) / .5;
     }
@@ -203,12 +222,8 @@ export class Simulation {
       if (a.state === 'exited') continue;
       // Dimensionless contact index. It is NOT force in newtons or pressure in pascals.
       a.contact += (clamp(a.rawContact / 120, 0, 1) - a.contact) * .12;
-      if (this.settings.casualties) {
-        a.dose = Math.max(0, a.dose + (a.contact > .62 ? (a.contact - .62) * 4 : -.25) * dt);
-        if (a.state === 'moving' && a.dose > 9) { a.state = 'fallen'; a.vx = 0; a.vy = 0; this.fallen++; }
-        if (a.state === 'fallen' && a.dose > 22) { a.state = 'dead'; this.dead++; this.fallen--; }
-      }
-      if (a.state !== 'moving') continue;
+      if (this.settings.casualties) this.advanceHealth(a, dt);
+      if (!isMobile(a)) continue;
       const oldX = a.x, oldY = a.y;
       a.vx += clamp(a.ax, -100, 100) * dt; a.vy += clamp(a.ay, -100, 100) * dt;
       const speed = Math.hypot(a.vx, a.vy), max = 5.5;
@@ -226,12 +241,12 @@ export class Simulation {
       }
       if (a.x < 0 || a.x > this.w || a.y < 0 || a.y > this.h) {
         const index = this.exits.findIndex(e => { const horizontal = e.side === 'top' || e.side === 'bottom'; return (e.side === 'left' ? a.x < 0 : e.side === 'right' ? a.x > this.w : e.side === 'top' ? a.y < 0 : a.y > this.h) && Math.abs((horizontal ? a.x : a.y) - e.at) < e.width / 2; });
-        if (index >= 0) { a.state = 'exited'; this.evacuated++; this.exitCounts[index]++; this.exitTimes.push(this.time); }
+        if (index >= 0) { if (a.state === 'injured') this.injured--; a.state = 'exited'; this.evacuated++; this.exitCounts[index]++; this.exitTimes.push(this.time); }
         else { a.x = clamp(a.x, .25, this.w - .25); a.y = clamp(a.y, .25, this.h - .25); a.vx = 0; a.vy = 0; }
       }
     }
     if (this.tick % 10 === 0) this.measure();
-    if (this.tick % 40 === 0) this.history.push({ time: this.time, evacuated: this.evacuated, flow: this.flow, contact: this.maxContact, density: this.maxDensity, fallen: this.fallen, dead: this.dead });
+    if (this.tick % 40 === 0) this.history.push({ time: this.time, evacuated: this.evacuated, flow: this.flow, contact: this.maxContact, density: this.maxDensity, fallen: this.fallen, injured: this.injured, dead: this.dead, recoveries: this.recoveries });
   }
   measure() {
     this.buildHash(); this.maxContact = 0; this.maxDensity = 0; this.trapped = 0; this.atRisk = 0;
@@ -242,7 +257,7 @@ export class Simulation {
       a.density = neighbors / Math.PI;
       this.maxDensity = Math.max(this.maxDensity, a.density); this.maxContact = Math.max(this.maxContact, a.contact);
       if (a.contact > .62) { this.atRisk++; this.exposure += .25; }
-      if (a.state === 'moving' && this.field.nearest(a.x, a.y) < 0) this.trapped++;
+      if (isMobile(a) && this.field.nearest(a.x, a.y) < 0) this.trapped++;
     }
     this.peakContact = Math.max(this.peakContact, this.maxContact); this.peakDensity = Math.max(this.peakDensity, this.maxDensity);
     let recent = 0; for (let i = this.exitTimes.length - 1; i >= 0 && this.exitTimes[i] > this.time - 10; i--) recent++;
@@ -250,5 +265,5 @@ export class Simulation {
   }
   get remaining() { return this.initialCount - this.evacuated - this.dead; }
   get complete() { return this.agents.every(a => a.state === 'exited' || a.state === 'dead'); }
-  snapshot() { return { scenario: this.scenario, settings: { ...this.settings }, walls: structuredClone(this.walls), exits: structuredClone(this.exits), arrows: structuredClone(this.arrows), time: this.time, total: this.initialCount, evacuated: this.evacuated, fallen: this.fallen, dead: this.dead, trapped: this.trapped, peakContact: this.peakContact, peakDensity: this.peakDensity, exposure: this.exposure, history: this.history.map(v => ({ ...v })) }; }
+  snapshot() { return { scenario: this.scenario, settings: { ...this.settings }, walls: structuredClone(this.walls), exits: structuredClone(this.exits), arrows: structuredClone(this.arrows), time: this.time, total: this.initialCount, evacuated: this.evacuated, fallen: this.fallen, injured: this.injured, dead: this.dead, recoveries: this.recoveries, trapped: this.trapped, peakContact: this.peakContact, peakDensity: this.peakDensity, exposure: this.exposure, history: this.history.map(v => ({ ...v })) }; }
 }

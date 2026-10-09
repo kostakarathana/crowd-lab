@@ -45,7 +45,7 @@ test('staggered release delays activation independently of urgency', () => {
 });
 test('extreme bottleneck contact produces exposure-based illustrative casualties', () => {
   const s = advance(new Simulation('concert', { count: 700, panic: 100 }), 70);
-  assert.ok(s.peakContact > .8); assert.ok(s.dead + s.fallen > 0);
+  assert.ok(s.peakContact > .8); assert.ok(s.dead + s.fallen + s.injured > 0);
   assert.equal(s.agents.filter(a => a.state === 'dead').length, s.dead);
   assert.equal(s.agents.filter(a => a.state === 'fallen').length, s.fallen);
 });
@@ -62,7 +62,7 @@ test('stadium population stays finite and every person is accounted for', () => 
   const s = advance(new Simulation('stadium', { count: 3500, panic: 100 }), 12);
   assert.equal(s.initialCount, 3500);
   for (const a of s.agents) assert.ok(Number.isFinite(a.x + a.y + a.vx + a.vy + a.contact));
-  assert.equal(s.evacuated + s.dead + s.fallen + s.agents.filter(a => a.state === 'moving').length, s.initialCount);
+  assert.equal(s.evacuated + s.dead + s.fallen + s.injured + s.agents.filter(a => a.state === 'moving').length, s.initialCount);
 });
 test('snapshot is detached and retains reproduction settings and history', () => {
   const s = advance(new Simulation('hall', { count: 100 }), 3), snapshot = s.snapshot();
