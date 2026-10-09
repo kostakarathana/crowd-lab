@@ -137,8 +137,8 @@ document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => { view =
 document.querySelectorAll('[data-speed]').forEach(b => b.onclick = () => { speed = +b.dataset.speed; document.querySelectorAll('[data-speed]').forEach(tab => { tab.classList.toggle('active', tab === b); tab.setAttribute('aria-pressed', tab === b); }); });
 $('play').onclick = () => setRunning(!running);
 $('reset').onclick = () => restart();
-$('undo').onclick = () => { const previous = undoStack.pop(); if (!previous) return; sim.walls = previous.walls; sim.exits = previous.exits; sim.arrows = previous.arrows || []; restart(); $('undo').disabled = !undoStack.length; };
-$('clear-walls').onclick = () => { if (sim.walls.length) editLayout(() => sim.walls = []); };
+$('undo').onclick = () => { const previous = undoStack.pop(); if (!previous) return; drawing = null; pointer = null; sim.walls = previous.walls; sim.exits = previous.exits; sim.arrows = previous.arrows || []; restart(); $('undo').disabled = !undoStack.length; };
+$('clear-walls').onclick = () => { drawing = null; pointer = null; if (sim.walls.length || sim.arrows.length) editLayout(() => { sim.walls = []; sim.arrows = []; }); else draw(); };
 $('scenario').onchange = () => { scenario = $('scenario').value; const v = scenarios[scenario]; settings = { ...settings, count: v.count, panic: v.panic, width: v.exits[0].width }; undoStack = []; $('undo').disabled = true; panX = panY = 0; zoom = 1; restart(false); changeZoom(1); };
 for (const [id, key] of [['population', 'count'], ['panic', 'panic'], ['exit-width', 'width'], ['friction', 'friction'], ['variation', 'variation']]) {
   $(id).addEventListener('input', () => { settings[key] = Number($(id).value); updateSettingsUI(); });
@@ -154,10 +154,13 @@ const dialog = $('science-dialog');
 $('science-open').onclick = () => dialog.showModal(); $('science-close').onclick = () => dialog.close();
 dialog.addEventListener('click', event => { if (event.target === dialog) { const r = dialog.getBoundingClientRect(); if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) dialog.close(); } });
 document.addEventListener('keydown', event => {
-  if (dialog.open || ['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON'].includes(document.activeElement?.tagName)) return;
+  const active = document.activeElement;
+  const editingText = active?.isContentEditable || active?.tagName === 'TEXTAREA' || (active?.tagName === 'INPUT' && !['range', 'checkbox', 'radio', 'button', 'submit'].includes(active.type));
+  if (dialog.open || editingText) return;
+  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'z') { event.preventDefault(); $('undo').click(); return; }
+  if (['INPUT', 'SELECT', 'BUTTON'].includes(active?.tagName)) return;
   if (event.key === 'Escape') { drawing = null; pointer = null; setTool('inspect'); }
   if (event.code === 'Space') { event.preventDefault(); setRunning(!running); }
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); $('undo').click(); return; }
   if (event.metaKey || event.ctrlKey || event.altKey) return;
   const tools = { v: 'inspect', w: 'wall', a: 'arrow', e: 'exit', r: 'erase' }; if (tools[event.key.toLowerCase()]) setTool(tools[event.key.toLowerCase()]);
 });
