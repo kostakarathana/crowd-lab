@@ -1,3 +1,4 @@
+import { drawPerson } from './people.js';
 import { guardCapacity } from './security.js';
 import { visibilityPolygon } from './visibility.js';
 import { Simulation, scenarios, defaults, DT, clamp, distanceToWall } from './engine.js';
@@ -12,6 +13,7 @@ const saveKey = 'crowd-lab-runs-v1';
 try { const stored = JSON.parse(localStorage.getItem(saveKey) || '[]'); if (Array.isArray(stored)) savedRuns = stored.filter(r => r && scenarios[r.scenario] && typeof r.time === 'number' && Array.isArray(r.walls) && Array.isArray(r.exits)).slice(-8); } catch { /* Storage is optional. */ }
 const fmt = n => Math.round(n).toLocaleString('en-US');
 const timeLabel = t => `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const colors = ['#b7d6a5', '#bbd9ac', '#99b98e', '#d3dfb1', '#aecda1'];
 
 function toast(message) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').hidden = true, 3300); }
@@ -140,13 +142,13 @@ canvas.addEventListener('pointerup', () => {
 });
 canvas.addEventListener('pointercancel', () => { drawing = null; pointer = null; draw(); });
 canvas.addEventListener('pointerleave', () => { hovered = null; $('inspection').hidden = true; });
-function changeZoom(value) { zoom = clamp(value, .6, 3); transform(); $('zoom-fit').textContent = `${Math.round(zoom * 100)}%`; draw(); }
+function changeZoom(value) { zoom = clamp(value, .6, 6); transform(); $('zoom-fit').textContent = `${Math.round(zoom * 100)}%`; draw(); }
 canvas.addEventListener('wheel', event => { event.preventDefault(); changeZoom(zoom * (event.deltaY > 0 ? .93 : 1.07)); }, { passive: false });
 $('zoom-in').onclick = () => changeZoom(zoom * 1.2); $('zoom-out').onclick = () => changeZoom(zoom / 1.2);
 $('zoom-fit').onclick = () => { panX = panY = 0; changeZoom(1); };
 $('fullscreen').onclick = async () => { try { if (document.fullscreenElement) await document.exitFullscreen(); else await $('canvas-wrap').requestFullscreen(); } catch { toast('Fullscreen is unavailable in this browser. Use zoom to inspect the crowd.'); } };
 document.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool));
-document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => { view = b.dataset.view; document.querySelectorAll('[data-view]').forEach(tab => { tab.classList.toggle('active', tab === b); tab.setAttribute('aria-pressed', tab === b); }); $('legend-description').innerHTML = view === 'density' ? '<i class="legend-person"></i> Local density · 1 m radius' : '<i class="legend-person"></i> One circle = one person'; $('color-legend').firstElementChild.textContent = view === 'density' ? '0 people/m²' : 'Low contact'; $('color-legend').lastElementChild.textContent = view === 'density' ? '6+' : 'High'; draw(); });
+document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => { view = b.dataset.view; document.querySelectorAll('[data-view]').forEach(tab => { tab.classList.toggle('active', tab === b); tab.setAttribute('aria-pressed', tab === b); }); $('legend-description').innerHTML = view === 'density' ? '<i class="legend-person"></i> Local density · 1 m radius' : '<i class="legend-person"></i> People'; $('color-legend').firstElementChild.textContent = view === 'density' ? '0 people/m²' : 'Low contact'; $('color-legend').lastElementChild.textContent = view === 'density' ? '6+' : 'High'; draw(); });
 document.querySelectorAll('[data-speed]').forEach(b => b.onclick = () => { speed = +b.dataset.speed; document.querySelectorAll('[data-speed]').forEach(tab => { tab.classList.toggle('active', tab === b); tab.setAttribute('aria-pressed', tab === b); }); });
 $('play').onclick = () => setRunning(!running);
 $('reset').onclick = () => restart();
@@ -226,13 +228,10 @@ function draw() {
   for (const a of sim.agents) {
     if (a.state === 'exited') continue;
     if (a.x * scale + originX < -10 || a.x * scale + originX > cw + 10 || a.y * scale + originY < -10 || a.y * scale + originY > ch + 10) continue;
-    if (a.state === 'dead') { ctx.strokeStyle = '#d66861'; ctx.lineWidth = .08; ctx.beginPath(); ctx.moveTo(a.x - .17, a.y - .17); ctx.lineTo(a.x + .17, a.y + .17); ctx.moveTo(a.x + .17, a.y - .17); ctx.lineTo(a.x - .17, a.y + .17); ctx.stroke(); continue; }
     const value = view === 'density' ? a.density / 6 : a.contact;
-    ctx.fillStyle = a.state === 'fallen' ? '#e4985d' : a.state === 'injured' ? '#f4798d' : view === 'people' && value < .18 ? colors[Math.floor(a.hue * colors.length)] : pressureColor(value);
-    ctx.globalAlpha = sim.time < a.start && sim.time > 0 ? .32 : a.waiting ? .55 : .9;
-    ctx.beginPath(); ctx.arc(a.x, a.y, a.radius * .83, 0, Math.PI * 2); ctx.fill();
-    if (a.escaping) { ctx.strokeStyle = '#96f5e6'; ctx.lineWidth = .07; ctx.beginPath(); ctx.arc(a.x, a.y, a.radius + .1, 0, Math.PI * 2); ctx.stroke(); }
-    if (a.state === 'fallen' || (a.state === 'injured' && a.down)) { ctx.strokeStyle = a.state === 'injured' ? '#ffc1ce' : '#fbd7a8'; ctx.lineWidth = .045; ctx.beginPath(); ctx.arc(a.x, a.y, a.radius + .08, 0, Math.PI * 2); ctx.stroke(); }
+    const shirt = a.state === 'dead' ? '#a26c67' : a.state === 'fallen' ? '#e4985d' : a.state === 'injured' ? '#f4798d' : view === 'people' && value < .18 ? colors[Math.floor(a.hue * colors.length)] : pressureColor(value);
+    ctx.globalAlpha = sim.time < a.start && sim.time > 0 ? .45 : a.waiting ? .75 : 1;
+    drawPerson(ctx, a, sim.time, shirt, reducedMotion.matches);
   }
   ctx.globalAlpha = 1;
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
@@ -248,10 +247,9 @@ function draw() {
     ctx.fillStyle = '#244c70'; ctx.strokeStyle = color; ctx.lineWidth = .12;
     ctx.beginPath(); ctx.moveTo(-.42, -.4); ctx.lineTo(.42, -.4); ctx.lineTo(.35, .15); ctx.lineTo(0, .48); ctx.lineTo(-.35, .15); ctx.closePath(); ctx.fill(); ctx.stroke();
     ctx.font = `bold ${Math.max(.4, 7 / scale)}px sans-serif`; ctx.fillStyle = color; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('S', 0, -.02);
-    if (guard.held) { ctx.lineWidth = .1; ctx.beginPath(); ctx.arc(0, 0, .75, 0, Math.PI * 2); ctx.stroke(); }
     ctx.restore();
   }
-  if (hovered && hovered.state !== 'exited') { ctx.strokeStyle = '#e6f6cb'; ctx.lineWidth = .08; ctx.beginPath(); ctx.arc(hovered.x, hovered.y, .45, 0, Math.PI * 2); ctx.stroke(); }
+  if (hovered && hovered.state !== 'exited') { ctx.strokeStyle = '#e6f6cb'; ctx.lineWidth = .05; ctx.strokeRect(hovered.x - .32, hovered.y - .38, .64, .76); }
   if (drawing) {
     if (tool === 'arrow') drawArrow({ ax: drawing.start.x, ay: drawing.start.y, bx: drawing.end.x, by: drawing.end.y }, true);
     else {
@@ -313,7 +311,7 @@ $('save-run').onclick = () => {
   renderRuns();
 };
 $('export-runs').onclick = () => {
-  const blob = new Blob([JSON.stringify({ model: 'crowd-lab-1.4', note: 'Qualitative uncalibrated model. Contact and casualty values are not real-world risk estimates.', runs: savedRuns }, null, 2)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify({ model: 'crowd-lab-1.5', note: 'Qualitative uncalibrated model. Contact and casualty values are not real-world risk estimates.', runs: savedRuns }, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = 'crowd-lab-experiments.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 function frame(now) {
