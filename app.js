@@ -1,3 +1,4 @@
+import { guardCapacity } from './security.js';
 import { visibilityPolygon } from './visibility.js';
 import { Simulation, scenarios, defaults, DT, clamp, distanceToWall } from './engine.js';
 
@@ -24,7 +25,7 @@ function updateSettingsUI() {
   $('dimensions').textContent = `${venue.w} × ${venue.h} m`;
   document.querySelectorAll('input[type=range]').forEach(input => input.style.setProperty('--fill', `${100 * (input.value - input.min) / (input.max - input.min)}%`));
 }
-function layout() { return { walls: structuredClone(sim.walls), exits: structuredClone(sim.exits), arrows: structuredClone(sim.arrows) }; }
+function layout() { return { walls: structuredClone(sim.walls), exits: structuredClone(sim.exits), arrows: structuredClone(sim.arrows), guards: sim.guards.map(({ x, y }) => ({ x, y })) }; }
 function restart(keepLayout = true) {
   const retained = keepLayout ? layout() : null;
   running = false; accumulator = 0; hovered = null; $('inspection').hidden = true;
@@ -37,7 +38,7 @@ function setTool(next) {
   tool = next; drawing = null;
   document.querySelectorAll('[data-tool]').forEach(b => { const active = b.dataset.tool === tool; b.classList.toggle('active', active); b.setAttribute('aria-pressed', active); });
   canvas.style.cursor = tool === 'inspect' ? 'grab' : 'crosshair';
-  const hints = { inspect: '', wall: 'Drag to draw · Shift to snap · resets run', arrow: 'Drag toward destination · 85% follow · resets run', exit: 'Click room edge to add exit · resets run', erase: 'Click wall, arrow or exit to erase · resets run' };
+  const hints = { inspect: '', security: 'Click to place security · resets run', wall: 'Drag to draw · Shift to snap · resets run', arrow: 'Drag toward destination · 85% follow · resets run', exit: 'Click room edge to add exit · resets run', erase: 'Click an object to erase · resets run' };
   $('canvas-hint').textContent = hints[tool]; $('canvas-hint').hidden = !hints[tool]; draw();
 }
 function setRunning(next) {
@@ -70,6 +71,8 @@ function nearEdge(p) {
   return { side: edges[0].side, at: clamp(edges[0].at, settings.width / 2 + .3, edges[0].len - settings.width / 2 - .3), width: settings.width };
 }
 function eraseAt(p) {
+  const guard = sim.guards.findIndex(g => Math.hypot(g.x - p.x, g.y - p.y) < Math.max(.6, 10 / scale));
+  if (guard >= 0) { editLayout(() => sim.guards.splice(guard, 1)); return; }
   let nearest = -1, arrowIndex = -1, d = Math.max(.6, 10 / scale);
   sim.walls.forEach((s, i) => { const distance = distanceToWall(p.x, p.y, s); if (distance < d) { d = distance; nearest = i; } });
   sim.arrows.forEach((s, i) => { const distance = distanceToWall(p.x, p.y, s); if (distance < d) { d = distance; arrowIndex = i; } });
@@ -77,7 +80,7 @@ function eraseAt(p) {
   if (nearest >= 0) { editLayout(() => sim.walls.splice(nearest, 1)); return; }
   const edge = nearEdge(p);
   if (edge) { const i = sim.exits.findIndex(e => e.side === edge.side && Math.abs(edge.at - e.at) < e.width / 2 + .4); if (i >= 0) { editLayout(() => sim.exits.splice(i, 1)); return; } }
-  toast('Click a wall, arrow or exit.');
+  toast('Click a wall, arrow, guard or exit.');
 }
 canvas.addEventListener('pointerdown', event => {
   if (event.button !== 0) return;
@@ -85,6 +88,11 @@ canvas.addEventListener('pointerdown', event => {
   if (tool === 'wall' || tool === 'arrow') {
     if (p.x < 0 || p.x > sim.w || p.y < 0 || p.y > sim.h) { toast('Start inside the venue.'); return; }
     setRunning(false); drawing = { start: clipped(p), end: clipped(p) };
+  } else if (tool === 'security') {
+    if (sim.guards.length >= 60) toast('60-guard limit reached.');
+    else if (p.x < .4 || p.x > sim.w - .4 || p.y < .4 || p.y > sim.h - .4 || sim.solids.some(s => distanceToWall(p.x, p.y, s) < .4) || sim.field.nearest(p.x, p.y) < 0) toast('Place security in a clear, reachable area.');
+    else if (sim.guards.some(g => Math.hypot(g.x - p.x, g.y - p.y) < .65)) toast('Leave space between guards.');
+    else editLayout(() => sim.guards.push({ x: p.x, y: p.y }));
   } else if (tool === 'exit') {
     const exit = nearEdge(p);
     if (!exit) toast('Place exits on the outer wall of the venue.');
@@ -104,8 +112,12 @@ canvas.addEventListener('pointermove', event => {
     let nearest = Math.max(.5, 9 / scale);
     for (const a of sim.agents) { if (a.state === 'exited') continue; const d = Math.hypot(a.x - p.x, a.y - p.y); if (d < nearest) { hovered = a; nearest = d; } }
   }
-  if (hovered) {
-    const state = hovered.state === 'moving' ? hovered.trapped ? 'No route to exit' : sim.time < hovered.start ? 'Waiting for release' : hovered.waiting ? 'Waiting for space' : hovered.arrow >= 0 ? 'Following exit arrow' : 'Moving to exit' : hovered.state === 'fallen' ? 'Fallen' : hovered.state === 'injured' ? hovered.down ? 'Injured · down' : 'Injured · walking' : 'Dead';
+  const guard = tool === 'inspect' && sim.guards.find(g => Math.hypot(g.x - p.x, g.y - p.y) < Math.max(.6, 9 / scale));
+  if (guard) {
+    $('inspection').innerHTML = `<b>SECURITY · ${(guard.mode || 'ready').toUpperCase()}</b>Holding ${guard.held || 0} / ${guardCapacity(settings.panic)}<br>Ahead ${(guard.aheadDensity || 0).toFixed(1)} people / m²`;
+    $('inspection').hidden = false;
+  } else if (hovered) {
+    const state = hovered.state === 'moving' ? hovered.trapped ? 'No route to exit' : sim.time < hovered.start ? 'Waiting for release' : hovered.securityHeld ? 'Held by security' : hovered.waiting ? 'Waiting for space' : hovered.arrow >= 0 ? 'Following exit arrow' : 'Moving to exit' : hovered.state === 'fallen' ? 'Fallen' : hovered.state === 'injured' ? hovered.down ? 'Injured · down' : 'Injured · walking' : 'Dead';
     $('inspection').innerHTML = `<b>PERSON ${hovered.id + 1} · ${state}</b>Local density ${hovered.density.toFixed(1)} people / m²<br>Contact index ${Math.round(hovered.contact * 100)}% · Speed ${Math.hypot(hovered.vx, hovered.vy).toFixed(1)} m/s`;
     $('inspection').hidden = false;
   } else $('inspection').hidden = true;
@@ -138,8 +150,8 @@ document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => { view =
 document.querySelectorAll('[data-speed]').forEach(b => b.onclick = () => { speed = +b.dataset.speed; document.querySelectorAll('[data-speed]').forEach(tab => { tab.classList.toggle('active', tab === b); tab.setAttribute('aria-pressed', tab === b); }); });
 $('play').onclick = () => setRunning(!running);
 $('reset').onclick = () => restart();
-$('undo').onclick = () => { const previous = undoStack.pop(); if (!previous) return; drawing = null; pointer = null; sim.walls = previous.walls; sim.exits = previous.exits; sim.arrows = previous.arrows || []; restart(); $('undo').disabled = !undoStack.length; };
-$('clear-walls').onclick = () => { drawing = null; pointer = null; if (sim.walls.length || sim.arrows.length) editLayout(() => { sim.walls = []; sim.arrows = []; }); else draw(); };
+$('undo').onclick = () => { const previous = undoStack.pop(); if (!previous) return; drawing = null; pointer = null; sim.walls = previous.walls; sim.exits = previous.exits; sim.arrows = previous.arrows || []; sim.guards = previous.guards || []; restart(); $('undo').disabled = !undoStack.length; };
+$('clear-walls').onclick = () => { drawing = null; pointer = null; if (sim.walls.length || sim.arrows.length || sim.guards.length) editLayout(() => { sim.walls = []; sim.arrows = []; sim.guards = []; }); else draw(); };
 $('scenario').onchange = () => { scenario = $('scenario').value; const v = scenarios[scenario]; settings = { ...settings, count: v.count, panic: v.panic, width: v.exits[0].width }; undoStack = []; $('undo').disabled = true; panX = panY = 0; zoom = 1; restart(false); changeZoom(1); };
 for (const [id, key] of [['population', 'count'], ['panic', 'panic'], ['exit-width', 'width'], ['friction', 'friction'], ['variation', 'variation']]) {
   $(id).addEventListener('input', () => { settings[key] = Number($(id).value); updateSettingsUI(); });
@@ -163,7 +175,7 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape') { drawing = null; pointer = null; setTool('inspect'); }
   if (event.code === 'Space') { event.preventDefault(); setRunning(!running); }
   if (event.metaKey || event.ctrlKey || event.altKey) return;
-  const tools = { v: 'inspect', w: 'wall', a: 'arrow', e: 'exit', r: 'erase' }; if (tools[event.key.toLowerCase()]) setTool(tools[event.key.toLowerCase()]);
+  const tools = { v: 'inspect', w: 'wall', a: 'arrow', s: 'security', e: 'exit', r: 'erase' }; if (tools[event.key.toLowerCase()]) setTool(tools[event.key.toLowerCase()]);
 });
 document.addEventListener('visibilitychange', () => { if (document.hidden && running) { setRunning(false); toast('Paused while the tab was in the background.'); } });
 
@@ -229,6 +241,15 @@ function draw() {
   }
   for (const wall of sim.walls) { ctx.fillStyle = '#c6d5aa'; ctx.beginPath(); ctx.arc(wall.ax, wall.ay, .15, 0, Math.PI * 2); ctx.arc(wall.bx, wall.by, .15, 0, Math.PI * 2); ctx.fill(); }
   for (const arrow of sim.arrows) drawArrow(arrow);
+  for (const guard of sim.guards) {
+    ctx.save(); ctx.translate(guard.x, guard.y);
+    const color = guard.mode === 'overwhelmed' ? '#ffc16b' : '#80c5ff';
+    ctx.fillStyle = '#244c70'; ctx.strokeStyle = color; ctx.lineWidth = .12;
+    ctx.beginPath(); ctx.moveTo(-.42, -.4); ctx.lineTo(.42, -.4); ctx.lineTo(.35, .15); ctx.lineTo(0, .48); ctx.lineTo(-.35, .15); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.font = `bold ${Math.max(.4, 7 / scale)}px sans-serif`; ctx.fillStyle = color; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('S', 0, -.02);
+    if (guard.held) { ctx.lineWidth = .1; ctx.beginPath(); ctx.arc(0, 0, .75, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.restore();
+  }
   if (hovered && hovered.state !== 'exited') { ctx.strokeStyle = '#e6f6cb'; ctx.lineWidth = .08; ctx.beginPath(); ctx.arc(hovered.x, hovered.y, .45, 0, Math.PI * 2); ctx.stroke(); }
   if (drawing) {
     if (tool === 'arrow') drawArrow({ ax: drawing.start.x, ay: drawing.start.y, bx: drawing.end.x, by: drawing.end.y }, true);
@@ -268,6 +289,7 @@ function updateUI() {
   $('exit-info').textContent = `${sim.exits.length} exit${sim.exits.length === 1 ? '' : 's'}`;
   $('route-warning').hidden = !sim.trapped;
   $('route-warning').textContent = sim.trapped ? `${fmt(sim.trapped)} people have no route to an exit.` : '';
+  $('security-status').hidden = !sim.guards.length; $('security-status').textContent = `Security ${sim.guards.length} · holding ${sim.held}`;
   $('save-run').disabled = sim.time < 1;
   drawChart();
 }
@@ -276,21 +298,21 @@ function renderRuns() {
   savedRuns.forEach((run, i) => {
     const tr = document.createElement('tr');
     const cells = [`${String(i + 1).padStart(2, '0')} / ${scenarios[run.scenario].name}`, timeLabel(run.time), `${fmt(run.evacuated)} / ${fmt(run.total)}`, `${Math.round(run.peakContact * 100)}%`, `${run.fallen} / ${run.injured || 0} / ${run.dead}`];
-    cells.forEach((text, n) => { const td = document.createElement('td'); td.textContent = text; if (n === 0) { const small = document.createElement('small'); small.textContent = `Panic ${run.settings.panic}% · ${run.walls.length} walls · ${run.arrows?.length || 0} arrows · seed ${run.settings.seed}`; td.append(small); } tr.append(td); });
+    cells.forEach((text, n) => { const td = document.createElement('td'); td.textContent = text; if (n === 0) { const small = document.createElement('small'); small.textContent = `Panic ${run.settings.panic}% · ${run.walls.length} walls · ${run.arrows?.length || 0} arrows · ${run.guards?.length || 0} guards · seed ${run.settings.seed}`; td.append(small); } tr.append(td); });
     const td = document.createElement('td'), button = document.createElement('button'); button.textContent = 'Restore ↗'; button.setAttribute('aria-label', `Restore layout and settings for run ${i + 1}`);
-    button.onclick = () => { scenario = run.scenario; settings = { ...defaults, ...run.settings }; sim.walls = structuredClone(run.walls); sim.exits = structuredClone(run.exits); sim.arrows = structuredClone(run.arrows || []); undoStack = []; $('undo').disabled = true; panX = panY = 0; zoom = 1; restart(); changeZoom(1); toast('Restored.'); }; td.append(button); tr.append(td); $('runs-body').append(tr);
+    button.onclick = () => { scenario = run.scenario; settings = { ...defaults, ...run.settings }; sim.walls = structuredClone(run.walls); sim.exits = structuredClone(run.exits); sim.arrows = structuredClone(run.arrows || []); sim.guards = structuredClone(run.guards || []); undoStack = []; $('undo').disabled = true; panX = panY = 0; zoom = 1; restart(); changeZoom(1); toast('Restored.'); }; td.append(button); tr.append(td); $('runs-body').append(tr);
   });
 }
 $('save-run').onclick = () => {
   if (sim.time < 1) { toast('Run the simulation for at least a second first.'); return; }
-  const key = `${sim.scenario}-${sim.tick}-${sim.evacuated}-${sim.walls.length}-${sim.arrows.length}`;
+  const key = `${sim.scenario}-${sim.tick}-${sim.evacuated}-${sim.walls.length}-${sim.arrows.length}-${sim.guards.length}`;
   if (key === lastSavedKey) { toast('This snapshot is already saved.'); return; }
   savedRuns.push(sim.snapshot()); savedRuns = savedRuns.slice(-8); lastSavedKey = key;
   try { localStorage.setItem(saveKey, JSON.stringify(savedRuns)); toast('Run saved. Compare it below.'); } catch { toast('Saved for this session. Browser storage is unavailable.'); }
   renderRuns();
 };
 $('export-runs').onclick = () => {
-  const blob = new Blob([JSON.stringify({ model: 'crowd-lab-1.2', note: 'Qualitative uncalibrated model. Contact and casualty values are not real-world risk estimates.', runs: savedRuns }, null, 2)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify({ model: 'crowd-lab-1.3', note: 'Qualitative uncalibrated model. Contact and casualty values are not real-world risk estimates.', runs: savedRuns }, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = 'crowd-lab-experiments.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 function frame(now) {

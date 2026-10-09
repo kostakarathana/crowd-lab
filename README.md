@@ -8,6 +8,7 @@ A browser-based crowd evacuation sandbox. Draw walls, place exits, release a cro
 - Adjust population, exit panic, departure staging, exit width, contact friction, speed variation, casualty modeling, and random seed.
 - Drag with the wall tool to add barriers. Hold Shift for 45° snapping.
 - Drag with the exit-arrow tool (**A**) to guide people toward a destination. Red signs show a 4.5 m visibility area clipped by walls. About 85% follow per encounter; conflicting signs favor less crowded routes, or split evenly at equal density. Erase and undo also work on arrows.
+- Press **S** and click to place security. Guards meter approaching crowds, release when space opens, and ease off if their queue compresses. Higher panic reduces each guard’s capacity; nearby guards share the load. Erase, bin, undo, saved layouts, and exports include guards.
 - Click the outer boundary with the exit tool to add a door. Erase works on walls and exits; undo restores geometry.
 - Use People, Contact, or Density views. Hover a person for details. Scroll to zoom or drag with the inspect tool to pan.
 - Release/pause, reset, or run at 1×, 2×, or 4×. Actual simulation time is displayed; slower devices may not achieve the requested multiplier.
@@ -34,6 +35,7 @@ See [RESEARCH.md](RESEARCH.md) for the evidence review and implementation choice
 
 - `engine.js`: browser-independent physics, congestion-aware routing, sign encounters, waiting, and reproducible seeding.
 - `navigation.js`: clearance-checked Dijkstra graph, waypoint shortcuts, dynamic obstacles, weighted arrow choices.
+- `security.js`: visible congestion sensing, shared guard capacity, bounded holds, and queue relief.
 - `health.js`: recovery, injury, and prolonged exposure states.
 - `visibility.js`: shared wall-clipped sign perception and range polygons.
 - `app.js`: canvas rendering, editor, controls, charts, persistence, export.

@@ -14,3 +14,5 @@
 @media(max-width:760px){.site-header{margin:0 14px;height:50px}main{padding:12px 12px 22px}.workspace{display:flex}.controls{padding:15px;gap:15px 18px}.controls>.section-title{margin:0}.venue-info{display:none}.controls .control-group{margin:0}.controls .advanced{padding-top:10px}.canvas-wrap{height:360px;min-height:360px}.canvas-topbar #save-run{font-size:9px}.canvas-tools{top:38px}.metrics{padding:17px 0}.metric strong{font-size:27px}.play-button{min-width:100px}.transport{padding:12px}.flow-details{margin-top:10px}}
 
 .casualty-counts{justify-content:space-between;gap:6px!important}.casualty-counts>span{display:flex;flex-direction:column;gap:6px;min-width:0}.casualty-counts strong{font-size:24px}.casualty-counts #injured{color:#b66a79}.casualty-counts #dead{color:#a46b65}
+
+.security-status{position:absolute;right:20px;top:18px;color:#80c5ff;font-size:9px;pointer-events:none}@media(max-width:760px){.security-status{right:12px;top:14px;font-size:8px}.canvas-tools{gap:1px}.canvas-tools button{width:28px}}
