@@ -68,41 +68,48 @@ test('escape can precede scheduled release and keeps physical motion finite', ()
   const fallback = s.navigate(a); assert.ok(Math.hypot(fallback.x, fallback.y) > .9);
 });
 
-test('a crowd that retreats from a bottleneck eventually resumes and fully evacuates', () => {
-  const s = new Simulation('concert', { count: 700, panic: 50, casualties: false }); let seenEscape = false, seenRegroup = false;
-  for (let i = 0; i < 350 / DT && !s.complete; i++) {
-    s.step();
-    if (i % 40 === 0) { seenEscape ||= s.agents.some(a => a.escaping); seenRegroup ||= s.agents.some(a => s.time < a.regroupUntil); }
+test('people recovering from a compression event resume evacuation without stragglers', () => {
+  const s = new Simulation('concert', { count: 200, panic: 50, casualties: false });
+  for (const a of s.agents.slice(0, 20)) {
+    Object.assign(a, { contact: .8, distress: 3, hue: .1 });
+    updateDistress(a, DT, 0, 50);
   }
-  assert.ok(seenEscape); assert.ok(seenRegroup); assert.equal(s.evacuated, 700);
+  assert.ok(s.agents.some(a => a.escaping));
+  let seenRegroup = false;
+  for (let i = 0; i < 180 / DT && !s.complete; i++) {
+    s.step();
+    if (i % 40 === 0) seenRegroup ||= s.agents.some(a => s.time < a.regroupUntil);
+  }
+  assert.ok(seenRegroup); assert.equal(s.evacuated, 200);
   assert.ok(s.agents.every(a => !a.escaping));
 });
 
-test('higher urgency progressively suppresses retreat under identical compression', () => {
+test('urgency reduces retreat smoothly without erasing every individual response', () => {
   const counts = [30, 60, 78, 90, 100].map(panic => {
     const s = new Simulation('hall', { count: 100, panic });
-    s.agents.forEach((a, i) => Object.assign(a, { hue: (i + .5) / 100, contact: 1, distress: 3, caution: 1 }));
+    s.agents.forEach((a, i) => Object.assign(a, { hue: (i + .5) / 100, contact: 1, distress: 2, caution: 1 }));
     for (const a of s.agents) updateDistress(a, DT, 1, panic);
     return s.agents.filter(a => a.escaping).length;
   });
-  assert.deepEqual(counts, [100, 25, 4, 0, 0]);
-  assert.equal(retreatTendency(100), 0); assert.equal(effectiveCaution(100, 1), 0);
+  assert.ok(counts.every((n, i) => !i || n < counts[i - 1]));
+  assert.ok(counts.at(-1) > 0 && counts.at(-1) < 25);
+  assert.ok(retreatTendency(100) > 0); assert.ok(effectiveCaution(100, 1) > 0);
 });
-test('maximum panic overrides remembered caution, regrouping, and an old retreat', () => {
+test('severe sustained compression can override exit fixation at any urgency', () => {
   const s = new Simulation('hall', { count: 1, panic: 100 }); const a = s.agents[0];
-  Object.assign(a, { x: 20, y: 15, start: 0, hue: 0, contact: 0, caution: 1, distress: 4, escaping: true, reliefTarget: { x: 17, y: 15 }, regroupUntil: 100, waitUntil: 100 });
-  s.routeDensity = x => x > 21 ? 3 : 1;
-  assert.equal(reliefDirection(s, a), null);
-  assert.equal(s.shouldWait(a, { x: 1, y: 0 }), false);
-  updateDistress(a, DT, 1, 100); assert.equal(a.escaping, false); assert.equal(a.regroupUntil, 0);
-  assert.equal(cautiousPanic(100, 1), 100);
-  s.updateRouting(); assert.equal(s.cautiousField, null);
-  const direction = s.navigate(a); assert.ok(direction.x > 0);
+  Object.assign(a, { x: 20, y: 15, start: 0, hue: .99, contact: .9, distress: 3.5 });
+  updateDistress(a, DT, 1, 100); assert.equal(a.escaping, true);
+  a.contact = .1; a.density = 1; a.distress = 2;
+  updateDistress(a, DT, 2, 100); assert.equal(a.escaping, true);
+  for (let i = 0; i < 85; i++) updateDistress(a, DT, 2 + i * DT, 100);
+  assert.equal(a.escaping, false); assert.ok(a.regroupUntil > 4);
 });
-test('an emergency bottleneck crowd keeps heading for exits without retreating', () => {
-  const s = new Simulation('concert', { count: 700, panic: 100, casualties: false });
-  for (let i = 0; i < 20 / DT; i++) {
-    s.step(); assert.ok(s.agents.every(a => !a.escaping && !a.waiting && a.regroupUntil === 0));
+test('urgent people still anticipate queues without routinely abandoning the exit', () => {
+  const s = new Simulation('concert', { count: 300, panic: 100, casualties: false }); let slowed = false, escaping = 0;
+  for (let i = 0; i < 30 / DT; i++) {
+    s.step();
+    slowed ||= s.agents.some(a => a.yielding);
+    escaping = Math.max(escaping, s.agents.filter(a => a.escaping).length);
   }
-  assert.ok(s.peakContact > .8); assert.ok(s.evacuated > 0);
+  assert.ok(slowed); assert.ok(escaping < s.initialCount / 4); assert.ok(s.evacuated > 0);
 });

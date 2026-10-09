@@ -1,13 +1,14 @@
+import { initializeBehavior, planMotion, selectExit } from './behavior.js';
 import { updateDistress, reliefDirection, cautiousPanic, effectiveCaution, retreatTendency } from './escape.js';
 import { updateSecurity } from './security.js';
 import { canSeeSign, sightWalls, visibilityPolygon } from './visibility.js';
-import { FlowField, chooseArrow } from './navigation.js';
+import { FlowField, chooseArrow, visibleSegment } from './navigation.js';
 import { isMobile, updateHealth } from './health.js';
 export { FlowField } from './navigation.js';
 // A qualitative social-force-inspired model, not a calibrated life-safety solver.
 export const DT = 1 / 40;
 export const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-export const defaults = { count: 1000, panic: 35, width: 2.6, release: 0, friction: 55, variation: 25, casualties: true, seed: 42 };
+export const defaults = { count: 1000, panic: 35, width: 2.6, release: 0, friction: 55, variation: 25, casualties: true, seed: 42, cooperation: 75, groups: 40 };
 export const scenarios = {
   hall: { name: 'Exhibition hall', tag: 'OPEN FLOOR', description: 'Two exits. A thousand different paths. Start with an open floor and shape the flow.', w: 48, h: 30, count: 1000, panic: 35, exits: [{ side: 'right', at: 10, width: 2.6 }, { side: 'right', at: 20, width: 2.6 }], walls: [] },
   concert: { name: 'Concert rush', tag: 'BOTTLENECK', description: 'A dense audience converges on one narrow door. Test the tradeoff between pressure and throughput.', w: 40, h: 28, count: 1400, panic: 78, exits: [{ side: 'right', at: 14, width: 1.6 }], walls: [] },
@@ -41,7 +42,7 @@ export class Simulation {
     this.time = 0; this.tick = 0; this.evacuated = 0; this.fallen = 0; this.injured = 0; this.dead = 0; this.recoveries = 0; this.trapped = 0; this.peakContact = 0; this.peakDensity = 0; this.exposure = 0;
     this.history = []; this.exitTimes = []; this.exitCounts = this.exits.map(() => 0); this.agents = []; this.hash = new Map(); this.bucketSize = 1.2;
     this.navigationRng = random(this.settings.seed ^ 0x1234abcd); this.healthRng = random(this.settings.seed ^ 0x76543210); this.routeVersion = 0; this.bodyCount = 0; this.routingDirty = false;
-    this.rebuild(); this.populate(); this.updateRouting(); this.measure();
+    this.rebuild(); this.populate(); initializeBehavior(this, random(this.settings.seed ^ 0x45f839ac)); this.updateRouting(); this.measure();
   }
   rebuild() { this.solids = [...boundaryWalls(this.w, this.h, this.exits), ...this.walls]; this.field = new FlowField(this.w, this.h, this.solids, this.exits); this.geometry = this.field.geometry; this.arrowFields = new Map(); this.signWalls = sightWalls(this.solids); this.signRanges = this.arrows.map(s => visibilityPolygon(s, this.signWalls)); }
   updateRouting() {
@@ -55,14 +56,18 @@ export class Simulation {
       if (!isMobile(a)) obstacles.push({ x: a.x, y: a.y, radius: a.radius });
     }
     const costs = new Float32Array(this.field.cols * this.field.rows);
-    const avoidance = this.settings.panic >= 90 ? 0 : .12 + 3.5 * (1 - this.settings.panic / 100) ** 2;
+    const avoidance = .12 + 3.5 * (1 - this.settings.panic / 100) ** 2;
     for (let i = 0; i < costs.length; i++) { const p = this.field.center(i); costs[i] = 1 + Math.min(12, this.routeDensity(p.x, p.y) * avoidance); }
     this.field = new FlowField(this.w, this.h, this.solids, this.exits, { geometry: this.geometry, costs, obstacles });
     if (this.agents.some(a => isMobile(a) && effectiveCaution(this.settings.panic, a.caution) > .2)) {
       const cautiousCosts = costs.map((cost, i) => { const p = this.field.center(i); return cost + Math.min(18, this.routeDensity(p.x, p.y) * 5 * retreatTendency(this.settings.panic)); });
       this.cautiousField = new FlowField(this.w, this.h, this.solids, this.exits, { geometry: this.geometry, costs: cautiousCosts, obstacles });
     } else this.cautiousField = null;
-    if (obstacles.length !== this.bodyCount || this.routingDirty) this.arrowFields.clear();
+    if (!this.exitFields || obstacles.length !== this.bodyCount || this.routingDirty) {
+      this.arrowFields.clear();
+      this.exitFields = this.exits.map(exit => new FlowField(this.w, this.h, this.solids, [exit], { geometry: this.geometry, obstacles }));
+      for (const a of this.agents) a.exitReview = 0;
+    }
     this.bodyCount = obstacles.length; this.routingDirty = false; this.routeVersion++;
   }
   routeDensity(x, y) {
@@ -110,12 +115,13 @@ export class Simulation {
       if (a.stalled >= 2) { a.waypoint = null; a.arrow = -1; a.nextSignRead = this.time + 6; }
     }
     if (!a.escaping) this.readArrows(a);
+    if (a.arrow < 0) selectExit(this, a);
     if (a.arrow >= 0) {
       const sign = this.arrows[a.arrow];
       if (this.time >= a.arrowUntil || Math.hypot(a.x - sign.bx, a.y - sign.by) < .8) { a.signMemory[a.arrow] = this.time + 20; a.arrow = -1; a.waypoint = null; }
     }
     if (!a.waypoint || this.time >= a.repathAt || a.routeVersion !== this.routeVersion || Math.hypot(a.x - a.waypoint.x, a.y - a.waypoint.y) < .35) {
-      const field = a.arrow >= 0 ? this.arrowField(a.arrow) : effectiveCaution(this.settings.panic, a.caution) > .2 && this.cautiousField ? this.cautiousField : this.field;
+      const field = a.arrow >= 0 ? this.arrowField(a.arrow) : this.exitFields[a.exitChoice] || this.field;
       a.waypoint = field?.waypoint(a.x, a.y);
       if (!a.waypoint && a.arrow >= 0) { a.arrow = -1; a.waypoint = this.field.waypoint(a.x, a.y); }
       a.repathAt = this.time + .45 + a.hue * .2; a.routeVersion = this.routeVersion;
@@ -125,7 +131,7 @@ export class Simulation {
     return { x: dx / length, y: dy / length, trapped: false };
   }
   shouldWait(a, direction) {
-    if (this.settings.panic >= 90) { a.waitUntil = 0; a.regroupUntil = 0; return false; }
+    if (this.settings.panic >= 90 && !a.escaping && this.time >= a.regroupUntil) { a.waitUntil = 0; return false; }
     const caution = effectiveCaution(this.settings.panic, a.caution);
     if (a.escaping) { a.waitUntil = 0; return false; }
     if (this.time < a.regroupUntil && a.contact < .2 && a.density < 2) return true;
@@ -165,9 +171,10 @@ export class Simulation {
     this.hash.clear();
     for (const a of this.agents) { if (a.state === 'exited') continue; const key = Math.floor(a.x / this.bucketSize) + Math.floor(a.y / this.bucketSize) * 10000; let list = this.hash.get(key); if (!list) { list = []; this.hash.set(key, list); } list.push(a); }
   }
-  neighbors(a, callback) {
+  neighbors(a, callback, radius = 1.2) {
     const x = Math.floor(a.x / this.bucketSize), y = Math.floor(a.y / this.bucketSize);
-    for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) { const list = this.hash.get(x + ox + (y + oy) * 10000); if (list) for (const b of list) callback(b); }
+    const extent = Math.ceil(radius / this.bucketSize);
+    for (let oy = -extent; oy <= extent; oy++) for (let ox = -extent; ox <= extent; ox++) { const list = this.hash.get(x + ox + (y + oy) * 10000); if (list) for (const b of list) callback(b); }
   }
   canStand(a) {
     if (a.contact >= .25 || a.density >= 4) return false;
@@ -200,17 +207,22 @@ export class Simulation {
       const direction = this.navigate(a); a.trapped = direction.trapped;
       if (a.contact > .35 || a.escaping) a.securityHeld = false;
       a.waiting = a.securityHeld || this.shouldWait(a, direction);
-      const variation = 1 + (a.factor - 1) * this.settings.variation / 35;
-      const desired = (this.time >= a.start || a.escaping) && !a.waiting ? (.95 + 3.5 * urgency * urgency) * variation * (a.state === 'injured' ? .55 : 1) : 0;
-      a.ax = (direction.x * desired - a.vx) / .5;
-      a.ay = (direction.y * desired - a.vy) / .5;
+      const active = (this.time >= a.start || a.escaping) && !a.waiting;
+      if (active && (this.time >= a.decisionAt || !a.intent)) {
+        a.intent = planMotion(this, a, direction);
+        a.decisionAt = this.time + .15 + (a.id % 3) * DT;
+      }
+      if (!active) { a.intent = null; a.yielding = false; a.accompanying = false; }
+      const intent = active && a.intent ? a.intent : { x: 0, y: 0, speed: 0 };
+      a.ax = (intent.x * intent.speed - a.vx) / a.response;
+      a.ay = (intent.y * intent.speed - a.vy) / a.response;
     }
     for (const a of this.agents) {
       if (a.state === 'exited') continue;
       this.neighbors(a, b => {
         if (b.id <= a.id) return;
         let dx = a.x - b.x, dy = a.y - b.y, d = Math.hypot(dx, dy);
-        if (d > 1.1) return;
+        if (d > 1.1 || !visibleSegment(a.x, a.y, b.x, b.y, this.walls, .02)) return;
         if (d < .0001) { dx = .001; dy = 0; d = .001; }
         const nx = dx / d, ny = dy / d, overlap = a.radius + b.radius - d;
         const repulsion = 2.6 * Math.exp(clamp(overlap / .12, -12, 3)) * (1 - .5 * urgency);
@@ -280,5 +292,5 @@ export class Simulation {
   }
   get remaining() { return this.initialCount - this.evacuated - this.dead; }
   get complete() { return this.agents.every(a => a.state === 'exited' || a.state === 'dead'); }
-  snapshot() { return { scenario: this.scenario, settings: { ...this.settings }, walls: structuredClone(this.walls), exits: structuredClone(this.exits), arrows: structuredClone(this.arrows), guards: this.guards.map(({ x, y }) => ({ x, y })), held: this.held, time: this.time, total: this.initialCount, evacuated: this.evacuated, fallen: this.fallen, injured: this.injured, dead: this.dead, recoveries: this.recoveries, trapped: this.trapped, peakContact: this.peakContact, peakDensity: this.peakDensity, exposure: this.exposure, history: this.history.map(v => ({ ...v })) }; }
+  snapshot() { return { model: 'crowd-lab-2.0', scenario: this.scenario, settings: { ...this.settings }, walls: structuredClone(this.walls), exits: structuredClone(this.exits), arrows: structuredClone(this.arrows), guards: this.guards.map(({ x, y }) => ({ x, y })), held: this.held, time: this.time, total: this.initialCount, evacuated: this.evacuated, fallen: this.fallen, injured: this.injured, dead: this.dead, recoveries: this.recoveries, trapped: this.trapped, peakContact: this.peakContact, peakDensity: this.peakDensity, exposure: this.exposure, history: this.history.map(v => ({ ...v })) }; }
 }

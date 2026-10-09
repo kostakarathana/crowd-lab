@@ -24,7 +24,7 @@ jobs:
       - name: Prepare static site
         run: |
           mkdir -p _site
-          cp index.html style.css app.js engine.js navigation.js health.js visibility.js security.js escape.js people.js favicon.svg .nojekyll _site/
+          cp index.html style.css app.js engine.js behavior.js navigation.js health.js visibility.js security.js escape.js people.js favicon.svg .nojekyll _site/
       - uses: actions/upload-pages-artifact@v4
         with:
           path: _site

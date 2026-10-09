@@ -5,7 +5,7 @@ A browser-based crowd evacuation sandbox. Draw walls, place exits, release a cro
 ## Use
 
 - Choose Exhibition hall, Concert rush, Stadium dispersal, or Concourse squeeze.
-- Adjust population, exit panic, departure staging, exit width, contact friction, speed variation, casualty modeling, and random seed.
+- Adjust population, exit urgency, departure staging, exit width, cooperation, companion groups, contact friction, speed variation, casualty modeling, and random seed.
 - Drag with the wall tool to add barriers. Hold Shift for 45° snapping.
 - Drag with the exit-arrow tool (**A**) to guide people toward a destination. Red signs show a 4.5 m visibility area clipped by walls. About 85% follow per encounter; conflicting signs favor less crowded routes, or split evenly at equal density. Erase and undo also work on arrows.
 - Press **S** and click to place security. Guards meter approaching crowds, release when space opens, and ease off if their queue compresses. Higher panic reduces each guard’s capacity; nearby guards share the load. Erase, bin, undo, saved layouts, and exports include guards.
@@ -15,7 +15,7 @@ A browser-based crowd evacuation sandbox. Draw walls, place exits, release a cro
 - Save up to eight run snapshots locally, restore their layouts/settings, or export JSON including per-second metrics.
 - Read **Info** for primary sources, model definitions, limitations, and shortcuts.
 
-Setup and layout edits restart the crowd. Saved runs are snapshots, not resumable physics states. Sustained or rising compression can make people seek open space, regroup, and remember the experience with stronger crowd avoidance that slowly fades. Rising urgency suppresses retreat and remembered caution; at 90% panic and above people keep heading for exits without voluntarily retreating or waiting. Security gives retreating people priority to move away. Calm people favor less crowded routes and some wait briefly before entering a dense queue; panic reduces both behaviors. Navigation replans around stationary casualties and remembers signs to prevent endless loops. A fixed seed reproduces a run for the same geometry and settings; changing geometry can change spawn positions. Staged departures activate people already present in the room, not new arrivals from outside. On very restricted layouts, the available spawn cells can limit the actual population; the denominator in the evacuated statistic shows the actual number simulated.
+Setup and layout edits restart the crowd. Saved runs are snapshots, not resumable physics states. Sustained or rising compression can make people seek open space, regroup, and remember the experience with stronger crowd avoidance that slowly fades. Urgency reduces retreat without erasing self-preservation: severe sustained compression can trigger escape at any setting. Cooperation is independent of urgency. Security gives retreating people priority to move away. Calm people favor less crowded routes and some wait briefly before entering a dense queue; urgency reduces both behaviors. People anticipate collisions, brake for queues and remember visible exit congestion before changing routes. Nearby companions loosely stay together. The optional varied response pattern adds bounded departure delays. Navigation replans around stationary casualties and remembers signs to prevent endless loops. A fixed seed reproduces a run for the same geometry and settings; changing geometry can change spawn positions. Staged departures activate people already present in the room, not new arrivals from outside. On very restricted layouts, the available spawn cells can limit the actual population; the denominator in the evacuated statistic shows the actual number simulated.
 
 ## Run locally
 
@@ -27,13 +27,14 @@ Push to `main` with GitHub Pages configured to use **GitHub Actions**. `.github/
 
 ## Model
 
-See [RESEARCH.md](RESEARCH.md) for the evidence review and implementation choices. The engine uses fixed 25 ms steps, a spatial hash for near-neighbor forces, a 0.5 m Dijkstra route field, soft disk contact and tangential friction, and hard wall containment. Agent radii are 0.215–0.25 m; people are drawn as overhead figures with movement-driven walking animation; physics still uses disks. Desired speed ranges from 0.95 to 4.45 m/s before individual variation. These values and the simplified force coefficients are illustrative, not a calibrated parameter set from a paper.
+See [RESEARCH.md](RESEARCH.md) for the evidence review and implementation choices. The engine uses fixed 25 ms steps, a spatial hash for near-neighbor forces, a 0.5 m Dijkstra route field, soft disk contact and tangential friction, and hard wall containment. Agent radii are 0.215–0.25 m; people are drawn as overhead figures with movement-driven walking animation; physics still uses disks. Nominal desired speed ranges from 1.3 to 3.5 m/s before individual variation. The layered decision system in `behavior.js` is a local agent planner, not a trained neural network. These values and the simplified force coefficients are illustrative, not a calibrated parameter set from a paper.
 
 **This is an exploratory toy model, not evacuation engineering software.** Contact scores are normalized model values, not measured force or clinical risk. Fall/injury/death thresholds are invented exposure rules and must not be used to estimate real casualties. There is no claim that a barrier arrangement shown here is safe for a real venue.
 
 ## Structure
 
 - `engine.js`: browser-independent physics, congestion-aware routing, sign encounters, waiting, and reproducible seeding.
+- `behavior.js`: collision anticipation, headway, individual traits, companions, response delays and exit-choice memory.
 - `navigation.js`: clearance-checked Dijkstra graph, waypoint shortcuts, dynamic obstacles, weighted arrow choices.
 - `escape.js`: rising-compression response, visible open-space search, regrouping, and lingering caution.
 - `security.js`: visible congestion sensing, shared guard capacity, bounded holds, and queue relief.
@@ -43,3 +44,7 @@ See [RESEARCH.md](RESEARCH.md) for the evidence review and implementation choice
 - `app.js`: canvas rendering, editor, controls, charts, persistence, export.
 - `index.html` / `style.css`: responsive, keyboard-operable interface and cited research notes.
 - `tests/engine.test.js`: route reachability, containment, conservation, deterministic replay, casualty behavior, and exit-width experiment.
+
+## Research and benchmarks
+
+The [23-paper evidence review](RESEARCH.md) distinguishes examined methods/results from abstract-only sources, and identifies the exact simplifications used. [Benchmark results](benchmarks/RESULTS.md) compare three seeds with the preceding revision. Reproduce them using `node benchmarks/run.js ./engine.js benchmarks/results.json`. These synthetic checks are not empirical validation.
