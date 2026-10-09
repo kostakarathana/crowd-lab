@@ -1,3 +1,5 @@
+import { FlowField, chooseArrow, visibleSegment } from './navigation.js';
+export { FlowField } from './navigation.js';
 // A qualitative social-force-inspired model, not a calibrated life-safety solver.
 export const DT = 1 / 40;
 export const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -27,90 +29,106 @@ export function boundaryWalls(w, h, exits) {
   }
   return walls;
 }
-class Heap {
-  constructor() { this.a = []; }
-  push(i, d) { let k = this.a.length; const item = { i, d }; this.a.push(item); while (k > 0) { const p = (k - 1) >> 1; if (this.a[p].d <= d) break; this.a[k] = this.a[p]; k = p; } this.a[k] = item; }
-  pop() { const first = this.a[0], last = this.a.pop(); if (this.a.length) { let k = 0; while (k * 2 + 1 < this.a.length) { let c = k * 2 + 1; if (c + 1 < this.a.length && this.a[c + 1].d < this.a[c].d) c++; if (this.a[c].d >= last.d) break; this.a[k] = this.a[c]; k = c; } this.a[k] = last; } return first; }
-}
-export class FlowField {
-  constructor(w, h, walls, exits) {
-    this.cell = 0.5; this.cols = Math.ceil(w / this.cell); this.rows = Math.ceil(h / this.cell); this.w = w; this.h = h;
-    const n = this.cols * this.rows;
-    this.blocked = new Uint8Array(n); this.distance = new Float32Array(n).fill(Infinity); this.dx = new Float32Array(n); this.dy = new Float32Array(n);
-    // Rasterize segments conservatively, including clearance for a person's center.
-    for (const wall of walls) {
-      const x0 = clamp(Math.floor((Math.min(wall.ax, wall.bx) - .5) / this.cell), 0, this.cols - 1), x1 = clamp(Math.ceil((Math.max(wall.ax, wall.bx) + .5) / this.cell), 0, this.cols - 1);
-      const y0 = clamp(Math.floor((Math.min(wall.ay, wall.by) - .5) / this.cell), 0, this.rows - 1), y1 = clamp(Math.ceil((Math.max(wall.ay, wall.by) + .5) / this.cell), 0, this.rows - 1);
-      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (distanceToWall((x + .5) * this.cell, (y + .5) * this.cell, wall) < .31) this.blocked[y * this.cols + x] = 1;
-    }
-    const heap = new Heap();
-    for (const e of exits) {
-      const horizontal = e.side === 'top' || e.side === 'bottom';
-      for (let p = 0; p < (horizontal ? this.cols : this.rows); p++) {
-        const value = (p + .5) * this.cell;
-        if (Math.abs(value - e.at) > e.width / 2 - .24) continue;
-        const x = horizontal ? p : e.side === 'left' ? 0 : this.cols - 1;
-        const y = horizontal ? e.side === 'top' ? 0 : this.rows - 1 : p;
-        const i = y * this.cols + x;
-        if (this.blocked[i]) continue;
-        this.distance[i] = 0; heap.push(i, 0);
-        this.dx[i] = e.side === 'left' ? -1 : e.side === 'right' ? 1 : 0;
-        this.dy[i] = e.side === 'top' ? -1 : e.side === 'bottom' ? 1 : 0;
-      }
-    }
-    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]];
-    while (heap.a.length) {
-      const { i, d } = heap.pop(); if (d > this.distance[i] + .001) continue;
-      const x = i % this.cols, y = Math.floor(i / this.cols);
-      for (const [ox, oy] of dirs) {
-        const nx = x + ox, ny = y + oy;
-        if (nx < 0 || ny < 0 || nx >= this.cols || ny >= this.rows) continue;
-        const ni = ny * this.cols + nx;
-        if (this.blocked[ni] || (ox && oy && (this.blocked[y * this.cols + nx] || this.blocked[ny * this.cols + x]))) continue;
-        const nd = d + (ox && oy ? Math.SQRT2 : 1);
-        if (nd < this.distance[ni] - .001) { this.distance[ni] = nd; heap.push(ni, nd); }
-      }
-    }
-    for (let y = 0; y < this.rows; y++) for (let x = 0; x < this.cols; x++) {
-      const i = y * this.cols + x, d = this.distance[i]; if (!Number.isFinite(d) || d === 0) continue;
-      // Central distance gradients reduce grid-aligned walking and preserve broad door use.
-      const value = (nx, ny) => nx < 0 || ny < 0 || nx >= this.cols || ny >= this.rows || !Number.isFinite(this.distance[ny * this.cols + nx]) ? d + 1 : this.distance[ny * this.cols + nx];
-      let dx = value(x - 1, y) - value(x + 1, y), dy = value(x, y - 1) - value(x, y + 1);
-      let len = Math.hypot(dx, dy);
-      if (len < .01) { let best = d; for (const [ox, oy] of dirs) { const nx = x + ox, ny = y + oy; if (value(nx, ny) < best) { best = value(nx, ny); dx = ox; dy = oy; } } len = Math.hypot(dx, dy); }
-      if (len) { this.dx[i] = dx / len; this.dy[i] = dy / len; }
-    }
-  }
-  index(x, y) { return clamp(Math.floor(y / this.cell), 0, this.rows - 1) * this.cols + clamp(Math.floor(x / this.cell), 0, this.cols - 1); }
-  direction(x, y) {
-    const i = this.index(x, y);
-    if (!Number.isFinite(this.distance[i])) {
-      // A center can occupy a conservative raster margin; find a nearby reachable cell.
-      let best = Infinity, target = -1;
-      const cx = i % this.cols, cy = Math.floor(i / this.cols);
-      for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) {
-        const nx = cx + ox, ny = cy + oy;
-        if (nx < 0 || ny < 0 || nx >= this.cols || ny >= this.rows) continue;
-        const ni = ny * this.cols + nx;
-        if (this.distance[ni] < best) { best = this.distance[ni]; target = ni; }
-      }
-      if (target < 0) return { x: 0, y: 0, trapped: true };
-      const dx = (target % this.cols + .5) * this.cell - x, dy = (Math.floor(target / this.cols) + .5) * this.cell - y, l = Math.hypot(dx, dy) || 1;
-      return { x: dx / l, y: dy / l, trapped: false };
-    }
-    return { x: this.dx[i], y: this.dy[i], trapped: false };
-  }
-}
 export class Simulation {
   constructor(scenario = 'hall', settings = {}, layout = null) {
     this.scenario = scenario; this.venue = scenarios[scenario]; this.settings = { ...defaults, count: this.venue.count, panic: this.venue.panic, width: this.venue.exits[0].width, ...settings };
     this.w = this.venue.w; this.h = this.venue.h;
-    this.walls = structuredClone(layout?.walls ?? this.venue.walls); this.exits = structuredClone(layout?.exits ?? this.venue.exits);
+    this.walls = structuredClone(layout?.walls ?? this.venue.walls); this.exits = structuredClone(layout?.exits ?? this.venue.exits); this.arrows = structuredClone(layout?.arrows ?? []);
     this.time = 0; this.tick = 0; this.evacuated = 0; this.fallen = 0; this.dead = 0; this.trapped = 0; this.peakContact = 0; this.peakDensity = 0; this.exposure = 0;
     this.history = []; this.exitTimes = []; this.exitCounts = this.exits.map(() => 0); this.agents = []; this.hash = new Map(); this.bucketSize = 1.2;
-    this.rebuild(); this.populate(); this.measure();
+    this.navigationRng = random(this.settings.seed ^ 0x1234abcd); this.routeVersion = 0; this.bodyCount = 0;
+    this.rebuild(); this.populate(); this.updateRouting(); this.measure();
   }
-  rebuild() { this.solids = [...boundaryWalls(this.w, this.h, this.exits), ...this.walls]; this.field = new FlowField(this.w, this.h, this.solids, this.exits); }
+  rebuild() { this.solids = [...boundaryWalls(this.w, this.h, this.exits), ...this.walls]; this.field = new FlowField(this.w, this.h, this.solids, this.exits); this.geometry = this.field.geometry; this.arrowFields = new Map(); }
+  updateRouting() {
+    this.densityCols = Math.ceil(this.w / 1.5); this.densityRows = Math.ceil(this.h / 1.5);
+    this.occupancy = new Float32Array(this.densityCols * this.densityRows);
+    const obstacles = [];
+    for (const a of this.agents) {
+      if (a.state === 'exited') continue;
+      const x = clamp(Math.floor(a.x / 1.5), 0, this.densityCols - 1), y = clamp(Math.floor(a.y / 1.5), 0, this.densityRows - 1);
+      this.occupancy[y * this.densityCols + x]++;
+      if (a.state !== 'moving') obstacles.push({ x: a.x, y: a.y, radius: a.radius });
+    }
+    const costs = new Float32Array(this.field.cols * this.field.rows);
+    const avoidance = .12 + 3.5 * (1 - this.settings.panic / 100) ** 2;
+    for (let i = 0; i < costs.length; i++) { const p = this.field.center(i); costs[i] = 1 + Math.min(12, this.routeDensity(p.x, p.y) * avoidance); }
+    this.field = new FlowField(this.w, this.h, this.solids, this.exits, { geometry: this.geometry, costs, obstacles });
+    if (obstacles.length !== this.bodyCount) this.arrowFields.clear();
+    this.bodyCount = obstacles.length; this.routeVersion++;
+  }
+  routeDensity(x, y) {
+    const cx = Math.floor(x / 1.5), cy = Math.floor(y / 1.5); let total = 0, cells = 0;
+    for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) { const nx = cx + ox, ny = cy + oy; if (nx >= 0 && ny >= 0 && nx < this.densityCols && ny < this.densityRows) { total += this.occupancy[ny * this.densityCols + nx]; cells++; } }
+    return total / Math.max(2.25, cells * 2.25);
+  }
+  arrowField(index) {
+    if (!this.arrowFields.has(index)) {
+      const sign = this.arrows[index];
+      const goal = this.field.nearest(sign.bx, sign.by);
+      this.arrowFields.set(index, goal < 0 ? null : new FlowField(this.w, this.h, this.solids, [], { geometry: this.geometry, obstacles: this.field.obstacles, goals: [this.field.center(goal)] }));
+    }
+    return this.arrowFields.get(index);
+  }
+  readArrows(a) {
+    if (a.arrow >= 0 || this.time < a.nextSignRead || a.stalled > 2) return;
+    a.nextSignRead = this.time + .7;
+    const candidates = [];
+    for (let i = 0; i < this.arrows.length; i++) {
+      const s = this.arrows[i];
+      if (a.signVisited[i] || (a.signMemory[i] || 0) > this.time || Math.hypot(a.x - s.ax, a.y - s.ay) > 4.5) continue;
+      if (!visibleSegment(a.x, a.y, s.ax, s.ay, this.solids, .02)) continue;
+      const field = this.arrowField(i);
+      if (!field || field.nearest(a.x, a.y) < 0) continue;
+      // Sample the indicated corridor, not just the shared location of two signs.
+      const density = [.45, .75, 1].reduce((sum, t) => sum + this.routeDensity(s.ax + (s.bx - s.ax) * t, s.ay + (s.by - s.ay) * t), 0) / 3;
+      candidates.push({ index: i, density });
+    }
+    if (!candidates.length) return;
+    const choice = chooseArrow(candidates, this.navigationRng, this.settings.panic);
+    for (const c of candidates) { a.signMemory[c.index] = this.time + (choice ? 18 : 2 + this.navigationRng() * 2); if (choice) a.signVisited[c.index] = true; }
+    if (choice) { a.arrow = choice.index; a.arrowUntil = this.time + 18; a.waypoint = null; }
+    else a.nextSignRead = this.time + 2 + this.navigationRng() * 2;
+  }
+  navigate(a) {
+    if (this.time < a.start) return { x: 0, y: 0, trapped: false };
+    // Progress is measured over time, so a jam isn't mistaken for a completed route.
+    if (this.time >= a.progressAt) {
+      const moved = Math.hypot(a.x - a.progressX, a.y - a.progressY);
+      a.stalled = moved < .18 && this.time >= a.waitUntil ? a.stalled + 1 : 0;
+      a.progressX = a.x; a.progressY = a.y; a.progressAt = this.time + 1;
+      if (a.stalled >= 2) { a.waypoint = null; a.arrow = -1; a.nextSignRead = this.time + 6; }
+    }
+    this.readArrows(a);
+    if (a.arrow >= 0) {
+      const sign = this.arrows[a.arrow];
+      if (this.time >= a.arrowUntil || Math.hypot(a.x - sign.bx, a.y - sign.by) < .8) { a.signMemory[a.arrow] = this.time + 20; a.arrow = -1; a.waypoint = null; }
+    }
+    if (!a.waypoint || this.time >= a.repathAt || a.routeVersion !== this.routeVersion || Math.hypot(a.x - a.waypoint.x, a.y - a.waypoint.y) < .35) {
+      const field = a.arrow >= 0 ? this.arrowField(a.arrow) : this.field;
+      a.waypoint = field?.waypoint(a.x, a.y);
+      if (!a.waypoint && a.arrow >= 0) { a.arrow = -1; a.waypoint = this.field.waypoint(a.x, a.y); }
+      a.repathAt = this.time + .45 + a.hue * .2; a.routeVersion = this.routeVersion;
+    }
+    if (!a.waypoint) return { x: 0, y: 0, trapped: true };
+    const dx = a.waypoint.x - a.x, dy = a.waypoint.y - a.y, length = Math.hypot(dx, dy) || 1;
+    return { x: dx / length, y: dy / length, trapped: false };
+  }
+  shouldWait(a, direction) {
+    const urgency = this.settings.panic / 100;
+    // Waiting is voluntary only in room to maneuver, not a freeze inside a crush.
+    if (urgency >= .65 || a.contact > .2 || direction.trapped || this.time < a.start) { a.waitUntil = 0; return false; }
+    if (this.time < a.waitUntil) return true;
+    if (this.time < a.nextWaitCheck) return false;
+    a.nextWaitCheck = this.time + 2 + a.hue * 2;
+    const ahead = this.routeDensity(a.x + direction.x * 2.5, a.y + direction.y * 2.5), here = this.routeDensity(a.x, a.y);
+    const willing = a.hue < .8 * (1 - urgency) ** 2;
+    if (willing && ahead > 2.1 && ahead > here + .35 && here < 3 && Math.min(a.x, a.y, this.w - a.x, this.h - a.y) > 1) {
+      a.waitUntil = this.time + 2 + 4 * (1 - urgency) * a.factor;
+      a.nextWaitCheck = a.waitUntil + 2; return true;
+    }
+    return false;
+  }
   populate() {
     const rng = random(this.settings.seed), cells = [], step = .57;
     for (let y = .7; y < this.h - .6; y += step) for (let x = .7; x < this.w - 2; x += step) {
@@ -127,6 +145,7 @@ export class Simulation {
       const p = cells[i]; this.agents.push({ id: i, x: p.x + (rng() - .5) * .10, y: p.y + (rng() - .5) * .10, vx: 0, vy: 0, ax: 0, ay: 0, radius: .215 + rng() * .035, factor: .7 + rng() * .6, start: this.settings.release ? i / this.settings.release : rng() * 2, state: 'moving', contact: 0, rawContact: 0, dose: 0, density: 0, trapped: false, hue: rng() });
     }
     this.initialCount = count;
+    for (const a of this.agents) Object.assign(a, { arrow: -1, arrowUntil: 0, nextSignRead: 0, signMemory: {}, signVisited: {}, waypoint: null, repathAt: 0, routeVersion: -1, progressAt: 1, progressX: a.x, progressY: a.y, stalled: 0, waitUntil: 0, nextWaitCheck: 0, waiting: false });
   }
   buildHash() {
     this.hash.clear();
@@ -141,13 +160,15 @@ export class Simulation {
     this.tick++; this.time = this.tick * DT;
     const urgency = this.settings.panic / 100, friction = this.settings.friction / 100;
     this.buildHash();
+    if (this.tick % 80 === 0) this.updateRouting();
     for (const a of this.agents) {
       if (a.state === 'exited') continue;
       a.rawContact = 0; a.ax = 0; a.ay = 0;
       if (a.state !== 'moving') continue;
-      const direction = this.field.direction(a.x, a.y); a.trapped = direction.trapped;
+      const direction = this.navigate(a); a.trapped = direction.trapped;
+      a.waiting = this.shouldWait(a, direction);
       const variation = 1 + (a.factor - 1) * this.settings.variation / 35;
-      const desired = this.time >= a.start ? (.95 + 3.5 * urgency * urgency) * variation : 0;
+      const desired = this.time >= a.start && !a.waiting ? (.95 + 3.5 * urgency * urgency) * variation : 0;
       a.ax = (direction.x * desired - a.vx) / .5;
       a.ay = (direction.y * desired - a.vy) / .5;
     }
@@ -221,7 +242,7 @@ export class Simulation {
       a.density = neighbors / Math.PI;
       this.maxDensity = Math.max(this.maxDensity, a.density); this.maxContact = Math.max(this.maxContact, a.contact);
       if (a.contact > .62) { this.atRisk++; this.exposure += .25; }
-      if (a.state === 'moving' && this.field.direction(a.x, a.y).trapped) this.trapped++;
+      if (a.state === 'moving' && this.field.nearest(a.x, a.y) < 0) this.trapped++;
     }
     this.peakContact = Math.max(this.peakContact, this.maxContact); this.peakDensity = Math.max(this.peakDensity, this.maxDensity);
     let recent = 0; for (let i = this.exitTimes.length - 1; i >= 0 && this.exitTimes[i] > this.time - 10; i--) recent++;
@@ -229,5 +250,5 @@ export class Simulation {
   }
   get remaining() { return this.initialCount - this.evacuated - this.dead; }
   get complete() { return this.agents.every(a => a.state === 'exited' || a.state === 'dead'); }
-  snapshot() { return { scenario: this.scenario, settings: { ...this.settings }, walls: structuredClone(this.walls), exits: structuredClone(this.exits), time: this.time, total: this.initialCount, evacuated: this.evacuated, fallen: this.fallen, dead: this.dead, trapped: this.trapped, peakContact: this.peakContact, peakDensity: this.peakDensity, exposure: this.exposure, history: this.history.map(v => ({ ...v })) }; }
+  snapshot() { return { scenario: this.scenario, settings: { ...this.settings }, walls: structuredClone(this.walls), exits: structuredClone(this.exits), arrows: structuredClone(this.arrows), time: this.time, total: this.initialCount, evacuated: this.evacuated, fallen: this.fallen, dead: this.dead, trapped: this.trapped, peakContact: this.peakContact, peakDensity: this.peakDensity, exposure: this.exposure, history: this.history.map(v => ({ ...v })) }; }
 }

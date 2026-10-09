@@ -7,13 +7,14 @@ A browser-based crowd evacuation sandbox. Draw walls, place exits, release a cro
 - Choose Exhibition hall, Concert rush, Stadium dispersal, or Concourse squeeze.
 - Adjust population, exit panic, departure staging, exit width, contact friction, speed variation, casualty modeling, and random seed.
 - Drag with the wall tool to add barriers. Hold Shift for 45° snapping.
+- Drag with the exit-arrow tool (**A**) to guide people toward a destination. About 85% follow per encounter; conflicting signs favor less crowded routes, or split evenly at equal density. Erase and undo also work on arrows.
 - Click the outer boundary with the exit tool to add a door. Erase works on walls and exits; undo restores geometry.
 - Use People, Contact, or Density views. Hover a person for details. Scroll to zoom or drag with the inspect tool to pan.
 - Release/pause, reset, or run at 1×, 2×, or 4×. Actual simulation time is displayed; slower devices may not achieve the requested multiplier.
 - Save up to eight run snapshots locally, restore their layouts/settings, or export JSON including per-second metrics.
 - Read **Info** for primary sources, model definitions, limitations, and shortcuts.
 
-Setup and layout edits restart the crowd. Saved runs are snapshots, not resumable physics states. A fixed seed reproduces a run for the same geometry and settings; changing geometry can change spawn positions. Staged departures activate people already present in the room, not new arrivals from outside. On very restricted layouts, the available spawn cells can limit the actual population; the denominator in the evacuated statistic shows the actual number simulated.
+Setup and layout edits restart the crowd. Saved runs are snapshots, not resumable physics states. Calm people favor less crowded routes and some wait briefly before entering a dense queue; panic reduces both behaviors. Navigation replans around stationary casualties and remembers signs to prevent endless loops. A fixed seed reproduces a run for the same geometry and settings; changing geometry can change spawn positions. Staged departures activate people already present in the room, not new arrivals from outside. On very restricted layouts, the available spawn cells can limit the actual population; the denominator in the evacuated statistic shows the actual number simulated.
 
 ## Run locally
 
@@ -31,7 +32,8 @@ See [RESEARCH.md](RESEARCH.md) for the evidence review and implementation choice
 
 ## Structure
 
-- `engine.js`: browser-independent simulation, geometry, route field, reproducible seeding.
+- `engine.js`: browser-independent physics, congestion-aware routing, sign encounters, waiting, and reproducible seeding.
+- `navigation.js`: clearance-checked Dijkstra graph, waypoint shortcuts, dynamic obstacles, weighted arrow choices.
 - `app.js`: canvas rendering, editor, controls, charts, persistence, export.
 - `index.html` / `style.css`: responsive, keyboard-operable interface and cited research notes.
 - `tests/engine.test.js`: route reachability, containment, conservation, deterministic replay, casualty behavior, and exit-width experiment.

@@ -51,3 +51,12 @@ These numbers are neither clinical thresholds nor calibrated fatality prediction
 ## Verification versus validation
 
 Automated tests verify implementation properties: repeatable seeds, accounting of every person, finite state at stadium scale, blocked-route detection, wall containment, width-sensitive evacuation, and the casualty toggle. Browser checks exercise the actual editor, playback, scenarios, saves, export, and responsive layout. These checks do **not** establish real-world predictive validity. Proper validation would require measured trajectories, empirical flow/density relationships, parameter sensitivity, geometry-specific observations, and independent expert review.
+
+
+## Navigation and exit signs (v1.1)
+
+The 0.5 m navigation grid stores explicit shortest-path successors, not just a local potential gradient. Edges and waypoint shortcuts are checked against walls. Every two seconds, a congestion-weighted route field is rebuilt with fallen/dead people as obstacles. Density is estimated in a 4.5 m neighborhood for routing (separate from the displayed 1 m-radius density). Stalled agents discard their current waypoint and sign commitment, then retry the exit route. A physically sealed enclosure remains unreachable.
+
+User-drawn signs are perceived within 4.5 m of their tail with wall visibility checks. Following a sign means routing toward its arrowhead, then resuming an exit route. On each eligible encounter, the requested compliance probability is 0.85; noncompliant agents reconsider after a 2–4 second interval. Alternatives have weights `(1 + density)^(-exponent)`, with the exponent decreasing from 2.6 at minimum panic to 0.3 at maximum panic. Thus equal-density signs receive equal odds, while calmer agents have a stronger bias toward less crowded directions. Accepted sign groups are remembered for the run to avoid cycles.
+
+Normal route traversal costs similarly penalize crowding by `0.12 + 3.5 × (1 − urgency)^2`. At panic below 65%, a subset with probability determined by `0.8 × (1 − urgency)^2` may wait in available space before a denser queue. A wait lasts roughly 2–7.2 seconds, with at least two seconds before another wait; physical compression cancels voluntary waiting. The requested behavioral percentages and waiting rules are game parameters, not empirically calibrated psychological claims.

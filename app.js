@@ -23,7 +23,7 @@ function updateSettingsUI() {
   $('dimensions').textContent = `${venue.w} × ${venue.h} m`;
   document.querySelectorAll('input[type=range]').forEach(input => input.style.setProperty('--fill', `${100 * (input.value - input.min) / (input.max - input.min)}%`));
 }
-function layout() { return { walls: structuredClone(sim.walls), exits: structuredClone(sim.exits) }; }
+function layout() { return { walls: structuredClone(sim.walls), exits: structuredClone(sim.exits), arrows: structuredClone(sim.arrows) }; }
 function restart(keepLayout = true) {
   const retained = keepLayout ? layout() : null;
   running = false; accumulator = 0; hovered = null; $('inspection').hidden = true;
@@ -36,7 +36,7 @@ function setTool(next) {
   tool = next; drawing = null;
   document.querySelectorAll('[data-tool]').forEach(b => { const active = b.dataset.tool === tool; b.classList.toggle('active', active); b.setAttribute('aria-pressed', active); });
   canvas.style.cursor = tool === 'inspect' ? 'grab' : 'crosshair';
-  const hints = { inspect: '', wall: 'Drag to draw · Shift to snap · resets run', exit: 'Click room edge to add exit · resets run', erase: 'Click wall or exit to erase · resets run' };
+  const hints = { inspect: '', wall: 'Drag to draw · Shift to snap · resets run', arrow: 'Drag toward destination · 85% follow · resets run', exit: 'Click room edge to add exit · resets run', erase: 'Click wall, arrow or exit to erase · resets run' };
   $('canvas-hint').textContent = hints[tool]; $('canvas-hint').hidden = !hints[tool]; draw();
 }
 function setRunning(next) {
@@ -69,18 +69,20 @@ function nearEdge(p) {
   return { side: edges[0].side, at: clamp(edges[0].at, settings.width / 2 + .3, edges[0].len - settings.width / 2 - .3), width: settings.width };
 }
 function eraseAt(p) {
-  let nearest = -1, d = Math.max(.6, 10 / scale);
+  let nearest = -1, arrowIndex = -1, d = Math.max(.6, 10 / scale);
   sim.walls.forEach((s, i) => { const distance = distanceToWall(p.x, p.y, s); if (distance < d) { d = distance; nearest = i; } });
+  sim.arrows.forEach((s, i) => { const distance = distanceToWall(p.x, p.y, s); if (distance < d) { d = distance; arrowIndex = i; } });
+  if (arrowIndex >= 0) { editLayout(() => sim.arrows.splice(arrowIndex, 1)); return; }
   if (nearest >= 0) { editLayout(() => sim.walls.splice(nearest, 1)); return; }
   const edge = nearEdge(p);
   if (edge) { const i = sim.exits.findIndex(e => e.side === edge.side && Math.abs(edge.at - e.at) < e.width / 2 + .4); if (i >= 0) { editLayout(() => sim.exits.splice(i, 1)); return; } }
-  toast('Click directly on a drawn wall or an exit.');
+  toast('Click a wall, arrow or exit.');
 }
 canvas.addEventListener('pointerdown', event => {
   if (event.button !== 0) return;
   canvas.focus({ preventScroll: true }); const p = worldPoint(event); canvas.setPointerCapture(event.pointerId);
-  if (tool === 'wall') {
-    if (p.x < 0 || p.x > sim.w || p.y < 0 || p.y > sim.h) { toast('Start your wall inside the venue.'); return; }
+  if (tool === 'wall' || tool === 'arrow') {
+    if (p.x < 0 || p.x > sim.w || p.y < 0 || p.y > sim.h) { toast('Start inside the venue.'); return; }
     setRunning(false); drawing = { start: clipped(p), end: clipped(p) };
   } else if (tool === 'exit') {
     const exit = nearEdge(p);
@@ -102,7 +104,7 @@ canvas.addEventListener('pointermove', event => {
     for (const a of sim.agents) { if (a.state === 'exited') continue; const d = Math.hypot(a.x - p.x, a.y - p.y); if (d < nearest) { hovered = a; nearest = d; } }
   }
   if (hovered) {
-    const state = hovered.state === 'moving' ? hovered.trapped ? 'No route to exit' : sim.time < hovered.start ? 'Waiting for release' : 'Moving to exit' : hovered.state === 'fallen' ? 'Fallen · illustrative' : 'Dead · illustrative';
+    const state = hovered.state === 'moving' ? hovered.trapped ? 'No route to exit' : sim.time < hovered.start ? 'Waiting for release' : hovered.waiting ? 'Waiting for space' : hovered.arrow >= 0 ? 'Following exit arrow' : 'Moving to exit' : hovered.state === 'fallen' ? 'Fallen · illustrative' : 'Dead · illustrative';
     $('inspection').innerHTML = `<b>PERSON ${hovered.id + 1} · ${state}</b>Local density ${hovered.density.toFixed(1)} people / m²<br>Contact index ${Math.round(hovered.contact * 100)}% · Speed ${Math.hypot(hovered.vx, hovered.vy).toFixed(1)} m/s`;
     $('inspection').hidden = false;
   } else $('inspection').hidden = true;
@@ -112,7 +114,12 @@ canvas.addEventListener('pointerup', () => {
   if (drawing) {
     const { start, end } = drawing; drawing = null;
     if (Math.hypot(start.x - end.x, start.y - end.y) > .4) {
-      if (sim.walls.length >= 80) toast('Wall limit reached. Erase a few segments before adding more.');
+      if (tool === 'arrow') {
+        if (sim.arrows.length >= 30) toast('30-arrow limit reached.');
+        else if (Math.hypot(start.x - end.x, start.y - end.y) < 1) toast('Draw an arrow at least 1 m long.');
+        else editLayout(() => sim.arrows.push({ ax: start.x, ay: start.y, bx: end.x, by: end.y }));
+      }
+      else if (sim.walls.length >= 80) toast('Wall limit reached. Erase a few segments before adding more.');
       else editLayout(() => sim.walls.push({ ax: start.x, ay: start.y, bx: end.x, by: end.y }));
     }
   }
@@ -130,7 +137,7 @@ document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => { view =
 document.querySelectorAll('[data-speed]').forEach(b => b.onclick = () => { speed = +b.dataset.speed; document.querySelectorAll('[data-speed]').forEach(tab => { tab.classList.toggle('active', tab === b); tab.setAttribute('aria-pressed', tab === b); }); });
 $('play').onclick = () => setRunning(!running);
 $('reset').onclick = () => restart();
-$('undo').onclick = () => { const previous = undoStack.pop(); if (!previous) return; sim.walls = previous.walls; sim.exits = previous.exits; restart(); $('undo').disabled = !undoStack.length; };
+$('undo').onclick = () => { const previous = undoStack.pop(); if (!previous) return; sim.walls = previous.walls; sim.exits = previous.exits; sim.arrows = previous.arrows || []; restart(); $('undo').disabled = !undoStack.length; };
 $('clear-walls').onclick = () => { if (sim.walls.length) editLayout(() => sim.walls = []); };
 $('scenario').onchange = () => { scenario = $('scenario').value; const v = scenarios[scenario]; settings = { ...settings, count: v.count, panic: v.panic, width: v.exits[0].width }; undoStack = []; $('undo').disabled = true; panX = panY = 0; zoom = 1; restart(false); changeZoom(1); };
 for (const [id, key] of [['population', 'count'], ['panic', 'panic'], ['exit-width', 'width'], ['friction', 'friction'], ['variation', 'variation']]) {
@@ -152,11 +159,17 @@ document.addEventListener('keydown', event => {
   if (event.code === 'Space') { event.preventDefault(); setRunning(!running); }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); $('undo').click(); return; }
   if (event.metaKey || event.ctrlKey || event.altKey) return;
-  const tools = { v: 'inspect', w: 'wall', e: 'exit', r: 'erase' }; if (tools[event.key.toLowerCase()]) setTool(tools[event.key.toLowerCase()]);
+  const tools = { v: 'inspect', w: 'wall', a: 'arrow', e: 'exit', r: 'erase' }; if (tools[event.key.toLowerCase()]) setTool(tools[event.key.toLowerCase()]);
 });
 document.addEventListener('visibilitychange', () => { if (document.hidden && running) { setRunning(false); toast('Paused while the tab was in the background.'); } });
 
 function pressureColor(value) { return value < .18 ? '#bbd7a3' : value < .35 ? '#d4d394' : value < .55 ? '#e4c373' : value < .73 ? '#e9a264' : value < .88 ? '#e37b58' : '#df5552'; }
+function drawArrow(s, preview = false) {
+  const angle = Math.atan2(s.by - s.ay, s.bx - s.ax), head = Math.min(.8, Math.hypot(s.bx - s.ax, s.by - s.ay) * .3);
+  ctx.save(); ctx.strokeStyle = preview ? '#c2fff6' : '#73cfcd'; ctx.lineWidth = preview ? .16 : .22; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.beginPath(); ctx.moveTo(s.ax, s.ay); ctx.lineTo(s.bx, s.by); ctx.moveTo(s.bx - Math.cos(angle - .6) * head, s.by - Math.sin(angle - .6) * head); ctx.lineTo(s.bx, s.by); ctx.lineTo(s.bx - Math.cos(angle + .6) * head, s.by - Math.sin(angle + .6) * head); ctx.stroke();
+  ctx.fillStyle = '#73cfcd'; ctx.beginPath(); ctx.arc(s.ax, s.ay, .2, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+}
 function draw() {
   if (!cw || !ch) return;
   transform(); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, cw, ch); ctx.fillStyle = '#192722'; ctx.fillRect(0, 0, cw, ch);
@@ -190,7 +203,7 @@ function draw() {
     if (a.state === 'dead') { ctx.strokeStyle = '#d66861'; ctx.lineWidth = .08; ctx.beginPath(); ctx.moveTo(a.x - .17, a.y - .17); ctx.lineTo(a.x + .17, a.y + .17); ctx.moveTo(a.x + .17, a.y - .17); ctx.lineTo(a.x - .17, a.y + .17); ctx.stroke(); continue; }
     const value = view === 'density' ? a.density / 6 : a.contact;
     ctx.fillStyle = a.state === 'fallen' ? '#e4985d' : view === 'people' && value < .18 ? colors[Math.floor(a.hue * colors.length)] : pressureColor(value);
-    ctx.globalAlpha = sim.time < a.start && sim.time > 0 ? .32 : .9;
+    ctx.globalAlpha = sim.time < a.start && sim.time > 0 ? .32 : a.waiting ? .55 : .9;
     ctx.beginPath(); ctx.arc(a.x, a.y, a.radius * .83, 0, Math.PI * 2); ctx.fill();
     if (a.state === 'fallen') { ctx.strokeStyle = '#fbd7a8'; ctx.lineWidth = .045; ctx.beginPath(); ctx.arc(a.x, a.y, a.radius + .08, 0, Math.PI * 2); ctx.stroke(); }
   }
@@ -201,9 +214,13 @@ function draw() {
     ctx.strokeStyle = '#96a97d'; ctx.lineWidth = .13; ctx.stroke();
   }
   for (const wall of sim.walls) { ctx.fillStyle = '#c6d5aa'; ctx.beginPath(); ctx.arc(wall.ax, wall.ay, .15, 0, Math.PI * 2); ctx.arc(wall.bx, wall.by, .15, 0, Math.PI * 2); ctx.fill(); }
+  for (const arrow of sim.arrows) drawArrow(arrow);
   if (hovered && hovered.state !== 'exited') { ctx.strokeStyle = '#e6f6cb'; ctx.lineWidth = .08; ctx.beginPath(); ctx.arc(hovered.x, hovered.y, .45, 0, Math.PI * 2); ctx.stroke(); }
   if (drawing) {
+    if (tool === 'arrow') drawArrow({ ax: drawing.start.x, ay: drawing.start.y, bx: drawing.end.x, by: drawing.end.y }, true);
+    else {
     ctx.strokeStyle = '#e5fdb6'; ctx.lineWidth = .15; ctx.setLineDash([.3, .2]); ctx.beginPath(); ctx.moveTo(drawing.start.x, drawing.start.y); ctx.lineTo(drawing.end.x, drawing.end.y); ctx.stroke(); ctx.setLineDash([]);
+    }
     const l = Math.hypot(drawing.end.x - drawing.start.x, drawing.end.y - drawing.start.y);
     ctx.font = `${11 / scale}px "DM Sans",sans-serif`; ctx.fillStyle = '#e3f6c7'; ctx.textAlign = 'center'; ctx.fillText(`${l.toFixed(1)} m`, (drawing.start.x + drawing.end.x) / 2, (drawing.start.y + drawing.end.y) / 2 - .65);
   }
@@ -245,21 +262,21 @@ function renderRuns() {
   savedRuns.forEach((run, i) => {
     const tr = document.createElement('tr');
     const cells = [`${String(i + 1).padStart(2, '0')} / ${scenarios[run.scenario].name}`, timeLabel(run.time), `${fmt(run.evacuated)} / ${fmt(run.total)}`, `${Math.round(run.peakContact * 100)}%`, `${run.fallen} / ${run.dead}`];
-    cells.forEach((text, n) => { const td = document.createElement('td'); td.textContent = text; if (n === 0) { const small = document.createElement('small'); small.textContent = `Panic ${run.settings.panic}% · ${run.walls.length} walls · seed ${run.settings.seed}`; td.append(small); } tr.append(td); });
+    cells.forEach((text, n) => { const td = document.createElement('td'); td.textContent = text; if (n === 0) { const small = document.createElement('small'); small.textContent = `Panic ${run.settings.panic}% · ${run.walls.length} walls · ${run.arrows?.length || 0} arrows · seed ${run.settings.seed}`; td.append(small); } tr.append(td); });
     const td = document.createElement('td'), button = document.createElement('button'); button.textContent = 'Restore ↗'; button.setAttribute('aria-label', `Restore layout and settings for run ${i + 1}`);
-    button.onclick = () => { scenario = run.scenario; settings = { ...defaults, ...run.settings }; sim.walls = structuredClone(run.walls); sim.exits = structuredClone(run.exits); undoStack = []; $('undo').disabled = true; panX = panY = 0; zoom = 1; restart(); changeZoom(1); toast('Saved layout and settings restored. Ready to rerun.'); }; td.append(button); tr.append(td); $('runs-body').append(tr);
+    button.onclick = () => { scenario = run.scenario; settings = { ...defaults, ...run.settings }; sim.walls = structuredClone(run.walls); sim.exits = structuredClone(run.exits); sim.arrows = structuredClone(run.arrows || []); undoStack = []; $('undo').disabled = true; panX = panY = 0; zoom = 1; restart(); changeZoom(1); toast('Restored.'); }; td.append(button); tr.append(td); $('runs-body').append(tr);
   });
 }
 $('save-run').onclick = () => {
   if (sim.time < 1) { toast('Run the simulation for at least a second first.'); return; }
-  const key = `${sim.scenario}-${sim.tick}-${sim.evacuated}-${sim.walls.length}`;
+  const key = `${sim.scenario}-${sim.tick}-${sim.evacuated}-${sim.walls.length}-${sim.arrows.length}`;
   if (key === lastSavedKey) { toast('This snapshot is already saved.'); return; }
   savedRuns.push(sim.snapshot()); savedRuns = savedRuns.slice(-8); lastSavedKey = key;
   try { localStorage.setItem(saveKey, JSON.stringify(savedRuns)); toast('Run saved. Compare it below.'); } catch { toast('Saved for this session. Browser storage is unavailable.'); }
   renderRuns();
 };
 $('export-runs').onclick = () => {
-  const blob = new Blob([JSON.stringify({ model: 'crowd-lab-1.0', note: 'Qualitative uncalibrated model. Contact and casualty values are not real-world risk estimates.', runs: savedRuns }, null, 2)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify({ model: 'crowd-lab-1.1', note: 'Qualitative uncalibrated model. Contact and casualty values are not real-world risk estimates.', runs: savedRuns }, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = 'crowd-lab-experiments.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 function frame(now) {
