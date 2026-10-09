@@ -75,6 +75,13 @@ Contact above 0.4 builds a distress signal, accelerated by rises relative to a t
 
 Every roughly 0.6–0.9 seconds, retreating agents search 16 directions at 1.5, 3, and 4.5 m. Targets must have lower estimated crowding and a straight walkable path clear of walls and stationary bodies. Sampled paths with a denser band are rejected. The search can choose a sideways or backward route. No reachable improvement means normal exit routing is retained; the response grants no immunity to contact forces, immobilization, or casualties.
 
-After two seconds with contact below 0.2 and local density below 1.8, people regroup for 2–4 seconds before resuming evacuation. Their lingering caution strengthens congestion costs, biases sign choices away from dense routes, and increases willingness to wait even at high panic. Caution starts fading only after 20 seconds without renewed high contact, at 0.008 per second. A shared cautious route field keeps this tractable at stadium scale. Inspection labels expose the behavior without adding controls.
+After two seconds with contact below 0.2 and local density below 1.8, people regroup for 2–4 seconds before resuming evacuation. Their lingering caution strengthens congestion costs, biases sign choices away from dense routes, and increases willingness to wait when urgency still allows it. Caution starts fading only after 20 seconds without renewed high contact, at 0.008 per second. A shared cautious route field keeps this tractable at stadium scale. Inspection labels expose the behavior without adding controls.
 
 These are illustrative behavioral rules requested for the simulator, not a calibrated account of human reactions or evidence that escape is always possible. Regression tests separately verify that an open bottleneck crowd can retreat and eventually evacuate, while a sealed overcrowded enclosure can still produce casualties.
+
+
+## Urgency overrides retreat (v1.6)
+
+The retreat tendency is `clamp((90 − panic) / 60, 0, 1)²`. Each person has a stable individual threshold, so fewer people consider withdrawing as urgency rises: all are eligible at panic 30 or lower, about 25% at 60, about 4% at 78, and none at 90 or higher. Distress still has to cross its existing exposure threshold before an eligible person retreats. Remembered caution and its route-cost penalty are attenuated by the same tendency, so past compression cannot silently override high urgency.
+
+At panic 90 and above, agents no longer voluntarily retreat, regroup, or stand back. Exit routing also drops its density penalty at this level, favoring the shortest traversable route. They still navigate around walls and bodies, follow visible signs, and can be held by security within its panic-dependent capacity. The model retains contact forces and casualties. This requested panic response is a game rule, not a claim about universal real-world emergency behavior.

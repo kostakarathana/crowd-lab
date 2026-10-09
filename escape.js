@@ -1,7 +1,9 @@
 import { isMobile } from './health.js';
 
 // Illustrative responses to the model's contact index, not psychological calibration.
-export const cautiousPanic = (panic, caution = 0) => panic * (1 - .85 * caution);
+export const retreatTendency = panic => Math.max(0, Math.min(1, (90 - panic) / 60)) ** 2;
+export const effectiveCaution = (panic, caution = 0) => caution * retreatTendency(panic);
+export const cautiousPanic = (panic, caution = 0) => panic * (1 - .85 * effectiveCaution(panic, caution));
 export function updateDistress(a, dt, time, panic) {
   if (a.state === 'dead' || a.state === 'exited') { a.escaping = false; return; }
   const rising = Math.max(0, a.contact - a.contactBaseline);
@@ -15,6 +17,11 @@ export function updateDistress(a, dt, time, panic) {
     if (time - a.lastCrush > 20) a.caution = Math.max(0, a.caution - .008 * dt);
   }
   if (!isMobile(a)) { a.escaping = false; a.reliefTarget = null; a.reliefSafe = 0; return; }
+  if (a.hue >= retreatTendency(panic)) {
+    if (a.escaping) { a.waypoint = null; a.repathAt = 0; }
+    a.escaping = false; a.reliefTarget = null; a.reliefSafe = 0; a.regroupUntil = 0;
+    return;
+  }
   if (!a.escaping && a.contact > .4 && a.distress > .5 + .45 * a.hue + .3 * panic / 100) {
     a.escaping = true; a.caution = Math.max(a.caution, .6); a.reliefSafe = 0; a.reliefCheck = 0;
     a.reliefTarget = null; a.waypoint = null; a.arrow = -1; a.waitUntil = 0; a.securityHeld = false;
@@ -30,7 +37,7 @@ export function updateDistress(a, dt, time, panic) {
 }
 
 export function reliefDirection(sim, a) {
-  if (!a.escaping) return null;
+  if (!a.escaping || a.hue >= retreatTendency(sim.settings.panic)) return null;
   // Keep a short commitment, but stop immediately if a body blocks the route.
   if (a.reliefTarget && !sim.field.clear(a.x, a.y, a.reliefTarget.x, a.reliefTarget.y)) { a.reliefTarget = null; a.reliefCheck = 0; }
   if (sim.time >= a.reliefCheck || (a.reliefTarget && Math.hypot(a.x - a.reliefTarget.x, a.y - a.reliefTarget.y) < .4)) {

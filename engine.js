@@ -1,4 +1,4 @@
-import { updateDistress, reliefDirection, cautiousPanic } from './escape.js';
+import { updateDistress, reliefDirection, cautiousPanic, effectiveCaution, retreatTendency } from './escape.js';
 import { updateSecurity } from './security.js';
 import { canSeeSign, sightWalls, visibilityPolygon } from './visibility.js';
 import { FlowField, chooseArrow } from './navigation.js';
@@ -55,11 +55,11 @@ export class Simulation {
       if (!isMobile(a)) obstacles.push({ x: a.x, y: a.y, radius: a.radius });
     }
     const costs = new Float32Array(this.field.cols * this.field.rows);
-    const avoidance = .12 + 3.5 * (1 - this.settings.panic / 100) ** 2;
+    const avoidance = this.settings.panic >= 90 ? 0 : .12 + 3.5 * (1 - this.settings.panic / 100) ** 2;
     for (let i = 0; i < costs.length; i++) { const p = this.field.center(i); costs[i] = 1 + Math.min(12, this.routeDensity(p.x, p.y) * avoidance); }
     this.field = new FlowField(this.w, this.h, this.solids, this.exits, { geometry: this.geometry, costs, obstacles });
-    if (this.agents.some(a => isMobile(a) && a.caution > .2)) {
-      const cautiousCosts = costs.map((cost, i) => { const p = this.field.center(i); return cost + Math.min(18, this.routeDensity(p.x, p.y) * 5); });
+    if (this.agents.some(a => isMobile(a) && effectiveCaution(this.settings.panic, a.caution) > .2)) {
+      const cautiousCosts = costs.map((cost, i) => { const p = this.field.center(i); return cost + Math.min(18, this.routeDensity(p.x, p.y) * 5 * retreatTendency(this.settings.panic)); });
       this.cautiousField = new FlowField(this.w, this.h, this.solids, this.exits, { geometry: this.geometry, costs: cautiousCosts, obstacles });
     } else this.cautiousField = null;
     if (obstacles.length !== this.bodyCount || this.routingDirty) this.arrowFields.clear();
@@ -115,7 +115,7 @@ export class Simulation {
       if (this.time >= a.arrowUntil || Math.hypot(a.x - sign.bx, a.y - sign.by) < .8) { a.signMemory[a.arrow] = this.time + 20; a.arrow = -1; a.waypoint = null; }
     }
     if (!a.waypoint || this.time >= a.repathAt || a.routeVersion !== this.routeVersion || Math.hypot(a.x - a.waypoint.x, a.y - a.waypoint.y) < .35) {
-      const field = a.arrow >= 0 ? this.arrowField(a.arrow) : a.caution > .2 && this.cautiousField ? this.cautiousField : this.field;
+      const field = a.arrow >= 0 ? this.arrowField(a.arrow) : effectiveCaution(this.settings.panic, a.caution) > .2 && this.cautiousField ? this.cautiousField : this.field;
       a.waypoint = field?.waypoint(a.x, a.y);
       if (!a.waypoint && a.arrow >= 0) { a.arrow = -1; a.waypoint = this.field.waypoint(a.x, a.y); }
       a.repathAt = this.time + .45 + a.hue * .2; a.routeVersion = this.routeVersion;
@@ -125,6 +125,8 @@ export class Simulation {
     return { x: dx / length, y: dy / length, trapped: false };
   }
   shouldWait(a, direction) {
+    if (this.settings.panic >= 90) { a.waitUntil = 0; a.regroupUntil = 0; return false; }
+    const caution = effectiveCaution(this.settings.panic, a.caution);
     if (a.escaping) { a.waitUntil = 0; return false; }
     if (this.time < a.regroupUntil && a.contact < .2 && a.density < 2) return true;
     const urgency = cautiousPanic(this.settings.panic, a.caution) / 100;
@@ -134,8 +136,8 @@ export class Simulation {
     if (this.time < a.nextWaitCheck) return false;
     a.nextWaitCheck = this.time + 2 + a.hue * 2;
     const ahead = this.routeDensity(a.x + direction.x * 2.5, a.y + direction.y * 2.5), here = this.routeDensity(a.x, a.y);
-    const willing = a.hue < Math.max(.8 * (1 - urgency) ** 2, a.caution * .9);
-    if (willing && ahead > 2.1 - a.caution * .6 && ahead > here + .35 && here < 3 && Math.min(a.x, a.y, this.w - a.x, this.h - a.y) > 1) {
+    const willing = a.hue < Math.max(.8 * (1 - urgency) ** 2, caution * .9);
+    if (willing && ahead > 2.1 - caution * .6 && ahead > here + .35 && here < 3 && Math.min(a.x, a.y, this.w - a.x, this.h - a.y) > 1) {
       a.waitUntil = this.time + 2 + 4 * (1 - urgency) * a.factor;
       a.nextWaitCheck = a.waitUntil + 2; return true;
     }
