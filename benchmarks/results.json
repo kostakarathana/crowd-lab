@@ -1,5 +1,5 @@
 {
-  "model": "crowd-lab-2.1",
+  "model": "crowd-lab-2.2",
   "note": "Synthetic regression scenarios; no calibration to trajectory data.",
   "results": [
     {

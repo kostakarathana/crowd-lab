@@ -1,5 +1,6 @@
 import { isMobile } from './health.js';
 import { canSeeSign } from './visibility.js';
+import { agentUrgency } from './social.js';
 
 export const guardCapacity = panic => Math.max(2, Math.floor(12 / (1 + 5 * (panic / 100) ** 2)));
 
@@ -8,10 +9,10 @@ export const guardCapacity = panic => Math.max(2, Math.floor(12 / (1 + 5 * (pani
 export function updateSecurity(sim) {
   const previouslyHeld = new Set(sim.agents.filter(a => a.securityHeld).map(a => a.id));
   for (const a of sim.agents) a.securityHeld = false;
-  const capacity = guardCapacity(sim.settings.panic), candidatesByGuard = new Map();
+  const candidatesByGuard = new Map();
   for (const guard of sim.guards) {
     const target = sim.field.waypoint(guard.x, guard.y);
-    guard.capacity = capacity; guard.held = 0; guard.demand = 0;
+    guard.capacity = guardCapacity(sim.settings.panic); guard.held = 0; guard.demand = 0;
     if (!target) { guard.mode = 'no route'; guard.holding = false; continue; }
     const length = Math.hypot(target.x - guard.x, target.y - guard.y) || 1;
     guard.dx = (target.x - guard.x) / length; guard.dy = (target.y - guard.y) / length;
@@ -27,6 +28,8 @@ export function updateSecurity(sim) {
     }
     // Same 10 m² observation windows for both sides; bodies count as congestion.
     guard.aheadDensity = aheadCount / 10;
+    const capacity = guardCapacity(Math.max(sim.settings.panic, ...visible.map(({ a }) => agentUrgency(sim, a))));
+    guard.capacity = capacity;
     const downstreamContact = aheadContact / Math.max(1, aheadCount), upstreamContact = behindContact / Math.max(1, behindCount);
     const relief = behindCount / 10 > 3.2 || upstreamContact > .45;
     if (relief) guard.holding = false;
@@ -34,7 +37,7 @@ export function updateSecurity(sim) {
     else if (guard.aheadDensity < 1.2 && downstreamContact < .2) guard.holding = false;
     if (!guard.holding) { guard.mode = relief ? 'relieving queue' : 'open'; continue; }
     const candidates = visible.filter(({ a }) => {
-      if (a.escaping || a.contact > .35 || sim.time < (a.securityCooldown || 0)) return false;
+      if (a.escaping || a.aidTarget != null || a.contact > .35 || sim.time < (a.securityCooldown || 0)) return false;
       if (previouslyHeld.has(a.id) && sim.time - a.securitySince >= 6) { a.securityCooldown = sim.time + 2; return false; }
       const route = a.waypoint || sim.field.waypoint(a.x, a.y);
       if (!route) return false;
@@ -56,7 +59,7 @@ export function updateSecurity(sim) {
   for (const guard of sim.guards) {
     if (guard.holding && guard.demand > guard.held) {
       const unheld = candidatesByGuard.get(guard)?.some(({ a }) => !a.securityHeld);
-      if (unheld && guard.held >= capacity) guard.mode = 'overwhelmed';
+      if (unheld && guard.held >= guard.capacity) guard.mode = 'overwhelmed';
     }
   }
   sim.held = sim.agents.filter(a => a.securityHeld).length;

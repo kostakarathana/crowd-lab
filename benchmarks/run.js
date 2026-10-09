@@ -11,7 +11,7 @@ for (const seed of [42, 71, 113]) for (const condition of [
   { name: 'urgent-competitive', panic: 100, cooperation: 0, width: 1.6 },
   { name: 'wider-exit', panic: 0, cooperation: 75, width: 3.2 }
 ]) {
-  const s = new Simulation('concert', { count: 200, groups: 0, seed, casualties: false, ...condition }, { walls: [], exits: [{ side: 'right', at: 14, width: condition.width }] });
+  const s = new Simulation('concert', { count: 200, groups: 0, ageVariation: 0, seed, casualties: false, ...condition }, { walls: [], exits: [{ side: 'right', at: 14, width: condition.width }] });
   let t10 = null, t90 = null, speedTotal = 0, samples = 0;
   for (let step = 0; step < 180 / DT && !s.complete; step++) {
     s.step();

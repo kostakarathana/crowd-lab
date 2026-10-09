@@ -68,6 +68,34 @@ test('cyclic arrows cannot keep an otherwise mobile crowd looping forever', () =
   assert.equal(s.evacuated, 100);
 });
 
+test('following an arrow commits to the indicated exit rather than turning back at its tip', () => {
+  const s = new Simulation('hall', { count: 1, panic: 0, ageVariation: 0, groups: 0 }, {
+    walls: [], exits: [{ side: 'left', at: 15, width: 3 }, { side: 'right', at: 15, width: 3 }],
+    arrows: [{ ax: 10, ay: 15, bx: 14, by: 15 }, { ax: 14, ay: 15, bx: 10, by: 15 }]
+  });
+  const a = s.agents[0]; Object.assign(a, { x: 10, y: 15, start: 0 });
+  s.navigationRng = () => 0; s.time = 1; s.readArrows(a); assert.equal(a.arrow, 0);
+  Object.assign(a, { x: 14, y: 15, progressX: 14, progressY: 15 });
+  assert.ok(s.navigate(a).x > .9); assert.equal(a.exitChoice, 1); assert.equal(a.arrow, -1);
+  s.time = 3; a.nextSignRead = 0; s.readArrows(a);
+  assert.equal(a.arrow, -1); assert.ok(s.navigate(a).x > .9);
+});
+
+test('people already beyond an arrow tip do not turn around to revisit it', () => {
+  const s = new Simulation('hall', { count: 1 }, { walls: [], exits: [{ side: 'right', at: 15, width: 3 }], arrows: [{ ax: 20, ay: 15, bx: 22, by: 15 }] });
+  const a = s.agents[0]; Object.assign(a, { x: 23, y: 15, start: 0 });
+  s.navigationRng = () => 0; s.readArrows(a); assert.equal(a.arrow, -1);
+});
+
+test('brief congestion does not cancel arrow commitment, but an unresolved jam has a timeout', () => {
+  const s = new Simulation('hall', { count: 1 }, { walls: [], exits: [{ side: 'right', at: 15, width: 3 }], arrows: [{ ax: 20, ay: 15, bx: 30, by: 15 }] });
+  const a = s.agents[0]; Object.assign(a, { x: 20, y: 15, start: 0, contact: .2, density: 4 });
+  s.navigationRng = () => 0; s.time = 1; s.readArrows(a);
+  for (let t = 2; t <= 25; t++) { s.time = t; s.navigate(a); }
+  assert.equal(a.arrow, 0);
+  s.time = 70; s.navigate(a); assert.equal(a.arrow, -1);
+});
+
 test('calm agents wait before a dense queue, panic reduces waiting, and waits expire', () => {
   const s = new Simulation('hall', { count: 100, panic: 0, casualties: false });
   s.occupancy.fill(0);

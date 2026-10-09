@@ -1,5 +1,6 @@
 import { isMobile } from './health.js';
 import { visibleSegment } from './navigation.js';
+import { agentUrgency } from './social.js';
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const angles = [0, -.25, .25, -.5, .5, -.8, .8, -1.1, 1.1];
@@ -7,7 +8,7 @@ const angles = [0, -.25, .25, -.5, .5, -.8, .8, -1.1, 1.1];
 // User-selected emergency regime, not an empirical threshold for human behavior.
 // Courtesy still varies between people; even courteous agents can shove here.
 export function emergencyDrive(sim, a) {
-  const panic = sim.settings.panic;
+  const panic = agentUrgency(sim, a);
   return panic < 90 || a.escaping ? 0 : (.2 + .8 * clamp((panic - 90) / 10, 0, 1)) * (1 - .35 * a.courtesy);
 }
 
@@ -71,7 +72,7 @@ export function companionPreference(sim, a, direction) {
   if (lagging && a.companionSince < 0) a.companionSince = sim.time;
   if (!lagging) a.companionSince = -1;
   // Never stop forever waiting for a separated friend, or walk backwards into a jam.
-  const strength = .22 * (1 - sim.settings.panic / 200);
+  const strength = .22 * (1 - agentUrgency(sim, a) / 200);
   let dx = direction.x + strength * x / count, dy = direction.y + strength * y / count;
   const norm = Math.hypot(dx, dy) || 1;
   a.accompanying = true;
@@ -79,17 +80,17 @@ export function companionPreference(sim, a, direction) {
 }
 
 export function preferredSpeed(sim, a) {
-  const urgency = sim.settings.panic / 100;
+  const urgency = agentUrgency(sim, a) / 100;
   const variation = clamp(1 + (a.factor - 1) * sim.settings.variation / 35, .45, 1.6);
-  return (1.3 + 2.2 * urgency * urgency) * variation * (a.state === 'injured' ? .55 : 1);
+  return (1.3 + 2.2 * urgency * urgency) * variation * (a.ageSpeed ?? 1) * (a.state === 'injured' ? .55 : 1);
 }
 
 // Cognitive local planning: compare candidate headings, anticipate moving bodies,
 // and leave a speed-dependent gap. Physical contact remains a separate force layer.
 export function planMotion(sim, a, route) {
   if (route.trapped || (!route.x && !route.y)) return { x: 0, y: 0, speed: 0 };
-  const direction = companionPreference(sim, a, route);
-  const urgency = sim.settings.panic / 100, speed = preferredSpeed(sim, a) * direction.pace;
+  const direction = route.helping ? { ...route, pace: .65 } : companionPreference(sim, a, route);
+  const urgency = agentUrgency(sim, a) / 100, speed = preferredSpeed(sim, a) * direction.pace;
   const emergency = emergencyDrive(sim, a);
   const horizon = (2.4 - .7 * urgency) * (1 - .45 * emergency);
   const reach = Math.min(6, Math.max(3, speed * horizon));
@@ -152,8 +153,8 @@ export function exitPosition(sim, exit, inset = .6) {
 // the floor plan itself is still assumed known, explicitly documented in Info.
 export function selectExit(sim, a) {
   if (sim.time < a.exitReview && a.exitChoice >= 0) return;
-  a.exitReview = sim.time + 2 + a.response * 2;
-  const options = [], speed = preferredSpeed(sim, a), urgency = sim.settings.panic / 100;
+  a.exitReview = sim.time + 2 + a.response * 2 + 4 * (a.arousal || 0);
+  const options = [], speed = preferredSpeed(sim, a), urgency = agentUrgency(sim, a) / 100;
   for (let i = 0; i < sim.exits.length; i++) {
     const field = sim.exitFields[i], cell = field.nearest(a.x, a.y);
     if (cell < 0) continue;
@@ -167,7 +168,7 @@ export function selectExit(sim, a) {
       a.exitMemory[i] = { at: sim.time, delay: count / Math.max(.5, e.width * (1 + Math.min(1, sumSpeed / Math.max(1, count)))) };
     }
     const memory = a.exitMemory[i], remembered = memory ? memory.delay * Math.exp(-(sim.time - memory.at) / 15) : 0;
-    const cost = field.distance[cell] * field.cell / speed + remembered * (1 - .5 * urgency) + (a.exitBias[i] || 0);
+    const cost = field.distance[cell] * field.cell / speed + remembered * (1 - .5 * urgency) * (1 - .8 * (a.arousal || 0)) + (a.exitBias[i] || 0);
     options.push({ index: i, cost });
   }
   options.sort((x, y) => x.cost - y.cost);

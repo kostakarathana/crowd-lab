@@ -1,4 +1,6 @@
 import { initializeBehavior, planMotion, selectExit } from './behavior.js';
+import { initializeDemographics } from './demographics.js';
+import { agentUrgency, updateStress, updateSocial, aidDirection } from './social.js';
 import { updateDistress, reliefDirection, cautiousPanic, effectiveCaution, retreatTendency } from './escape.js';
 import { updateSecurity } from './security.js';
 import { canSeeSign, sightWalls, visibilityPolygon } from './visibility.js';
@@ -8,7 +10,7 @@ export { FlowField } from './navigation.js';
 // A qualitative social-force-inspired model, not a calibrated life-safety solver.
 export const DT = 1 / 40;
 export const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-export const defaults = { count: 1000, panic: 35, width: 2.6, release: 0, friction: 55, variation: 25, casualties: true, seed: 42, cooperation: 75, groups: 40 };
+export const defaults = { count: 1000, panic: 35, width: 2.6, release: 0, friction: 55, variation: 25, casualties: true, seed: 42, cooperation: 75, groups: 40, ageVariation: 35 };
 export const scenarios = {
   hall: { name: 'Exhibition hall', tag: 'OPEN FLOOR', description: 'Two exits. A thousand different paths. Start with an open floor and shape the flow.', w: 48, h: 30, count: 1000, panic: 35, exits: [{ side: 'right', at: 10, width: 2.6 }, { side: 'right', at: 20, width: 2.6 }], walls: [] },
   concert: { name: 'Concert rush', tag: 'BOTTLENECK', description: 'A dense audience converges on one narrow door. Test the tradeoff between pressure and throughput.', w: 40, h: 28, count: 1400, panic: 78, exits: [{ side: 'right', at: 14, width: 1.6 }], walls: [] },
@@ -42,7 +44,7 @@ export class Simulation {
     this.time = 0; this.tick = 0; this.evacuated = 0; this.fallen = 0; this.injured = 0; this.dead = 0; this.recoveries = 0; this.trapped = 0; this.peakContact = 0; this.peakDensity = 0; this.exposure = 0;
     this.history = []; this.exitTimes = []; this.exitCounts = this.exits.map(() => 0); this.agents = []; this.hash = new Map(); this.bucketSize = 1.2;
     this.navigationRng = random(this.settings.seed ^ 0x1234abcd); this.healthRng = random(this.settings.seed ^ 0x76543210); this.routeVersion = 0; this.bodyCount = 0; this.routingDirty = false;
-    this.rebuild(); this.populate(); initializeBehavior(this, random(this.settings.seed ^ 0x45f839ac)); this.updateRouting(); this.measure();
+    this.rebuild(); this.populate(); initializeDemographics(this, random(this.settings.seed ^ 0x239db571)); initializeBehavior(this, random(this.settings.seed ^ 0x45f839ac)); this.updateRouting(); this.measure();
   }
   rebuild() { this.solids = [...boundaryWalls(this.w, this.h, this.exits), ...this.walls]; this.field = new FlowField(this.w, this.h, this.solids, this.exits); this.geometry = this.field.geometry; this.arrowFields = new Map(); this.signWalls = sightWalls(this.solids); this.signRanges = this.arrows.map(s => visibilityPolygon(s, this.signWalls)); }
   updateRouting() {
@@ -91,6 +93,11 @@ export class Simulation {
       const s = this.arrows[i];
       if (a.signVisited[i] || (a.signMemory[i] || 0) > this.time) continue;
       if (!canSeeSign(a.x, a.y, s, this.signWalls)) continue;
+      const length = Math.hypot(s.bx - s.ax, s.by - s.ay) || 1;
+      const dx = (s.bx - s.ax) / length, dy = (s.by - s.ay) / length;
+      // A sign points onwards, not back to its tip after somebody has passed it.
+      if ((a.x - s.bx) * dx + (a.y - s.by) * dy > .4) continue;
+      if (a.signHeading && this.time < a.signHeading.until && dx * a.signHeading.x + dy * a.signHeading.y < -.25) continue;
       const field = this.arrowField(i);
       if (!field || field.nearest(a.x, a.y) < 0) continue;
       // Sample the indicated corridor, not just the shared location of two signs.
@@ -98,27 +105,66 @@ export class Simulation {
       candidates.push({ index: i, density });
     }
     if (!candidates.length) return;
-    const choice = chooseArrow(candidates, this.navigationRng, cautiousPanic(this.settings.panic, a.caution));
+    const choice = chooseArrow(candidates, this.navigationRng, cautiousPanic(agentUrgency(this, a), a.caution));
     for (const c of candidates) { a.signMemory[c.index] = this.time + (choice ? 18 : 2 + this.navigationRng() * 2); if (choice) a.signVisited[c.index] = true; }
-    if (choice) { a.arrow = choice.index; a.arrowUntil = this.time + 18; a.waypoint = null; }
+    if (choice) {
+      a.arrow = choice.index; a.arrowUntil = this.time + 18; a.arrowAccepted = this.time; a.arrowBest = Infinity;
+      a.waypoint = null; a.intent = null;
+    }
     else a.nextSignRead = this.time + 2 + this.navigationRng() * 2;
+  }
+  finishArrow(a, completed) {
+    const sign = this.arrows[a.arrow];
+    a.signMemory[a.arrow] = this.time + 20;
+    if (completed && sign) {
+      const length = Math.hypot(sign.bx - sign.ax, sign.by - sign.ay) || 1;
+      const dx = (sign.bx - sign.ax) / length, dy = (sign.by - sign.ay) / length;
+      a.signHeading = { x: dx, y: dy, until: this.time + 8 };
+      // Keep the exit indicated by the sign instead of immediately selecting a
+      // slightly nearer door behind the person at the end of every arrow.
+      let best = -1, cost = Infinity;
+      this.exitFields.forEach((field, index) => {
+        const cell = field.nearest(a.x, a.y), point = field.waypoint(a.x, a.y);
+        if (cell < 0 || !point) return;
+        const distance = Math.hypot(point.x - a.x, point.y - a.y) || 1;
+        const alignment = ((point.x - a.x) * dx + (point.y - a.y) * dy) / distance;
+        const score = field.distance[cell] * field.cell + Math.max(0, -alignment) * Math.max(this.w, this.h);
+        if (score < cost) { cost = score; best = index; }
+      });
+      if (best >= 0) { a.exitChoice = best; a.exitCommitted = this.time + 20; a.exitReview = this.time + 3; }
+    }
+    a.arrow = -1; a.waypoint = null; a.intent = null; a.nextSignRead = this.time + .7;
   }
   navigate(a) {
     const relief = reliefDirection(this, a);
     if (relief) return relief;
     if (!a.escaping && this.time < a.start) return { x: 0, y: 0, trapped: false };
+    const aid = aidDirection(this, a);
+    if (aid) return aid;
     // Progress is measured over time, so a jam isn't mistaken for a completed route.
     if (this.time >= a.progressAt) {
       const moved = Math.hypot(a.x - a.progressX, a.y - a.progressY);
       a.stalled = moved < .18 && !a.securityHeld && this.time >= a.waitUntil ? a.stalled + 1 : 0;
       a.progressX = a.x; a.progressY = a.y; a.progressAt = this.time + 1;
-      if (a.stalled >= 2) { a.waypoint = null; a.arrow = -1; a.nextSignRead = this.time + 6; }
+      if (a.stalled >= 2) {
+        a.waypoint = null;
+        // A queue is not evidence that the sign is wrong. Only abandon a sign
+        // after sustained failure to make progress with free space around us.
+        if (a.arrow >= 0 && a.stalled >= 6 && a.contact < .12 && a.density < 2 && !a.waiting) this.finishArrow(a, false);
+      }
     }
     if (!a.escaping) this.readArrows(a);
     if (a.arrow < 0) selectExit(this, a);
     if (a.arrow >= 0) {
-      const sign = this.arrows[a.arrow];
-      if (this.time >= a.arrowUntil || Math.hypot(a.x - sign.bx, a.y - sign.by) < .8) { a.signMemory[a.arrow] = this.time + 20; a.arrow = -1; a.waypoint = null; }
+      const field = this.arrowField(a.arrow), cell = field?.nearest(a.x, a.y) ?? -1;
+      const distance = cell >= 0 ? field.distance[cell] * field.cell : Infinity;
+      if (distance < (a.arrowBest ?? Infinity) - .25) { a.arrowBest = distance; a.arrowUntil = this.time + 18; }
+      if (distance < .8) this.finishArrow(a, true);
+      else if (!Number.isFinite(distance)) this.finishArrow(a, false);
+      else if (this.time >= a.arrowUntil) {
+        if ((a.contact >= .12 || a.density >= 2 || a.waiting) && this.time < (a.arrowAccepted || 0) + 60) a.arrowUntil = this.time + 5;
+        else this.finishArrow(a, false);
+      }
     }
     if (!a.waypoint || this.time >= a.repathAt || a.routeVersion !== this.routeVersion || Math.hypot(a.x - a.waypoint.x, a.y - a.waypoint.y) < .35) {
       const field = a.arrow >= 0 ? this.arrowField(a.arrow) : this.exitFields[a.exitChoice] || this.field;
@@ -131,11 +177,13 @@ export class Simulation {
     return { x: dx / length, y: dy / length, trapped: false };
   }
   shouldWait(a, direction) {
-    if (this.settings.panic >= 90 && !a.escaping && this.time >= a.regroupUntil) { a.waitUntil = 0; return false; }
-    const caution = effectiveCaution(this.settings.panic, a.caution);
+    if (direction.helping) return false;
+    const panic = agentUrgency(this, a);
+    if (panic >= 90 && !a.escaping && this.time >= a.regroupUntil) { a.waitUntil = 0; return false; }
+    const caution = effectiveCaution(panic, a.caution);
     if (a.escaping) { a.waitUntil = 0; return false; }
     if (this.time < a.regroupUntil && a.contact < .2 && a.density < 2) return true;
-    const urgency = cautiousPanic(this.settings.panic, a.caution) / 100;
+    const urgency = cautiousPanic(panic, a.caution) / 100;
     // Waiting is voluntary only in room to maneuver, not a freeze inside a crush.
     if (urgency >= .65 || a.contact > .2 || direction.trapped || this.time < a.start) { a.waitUntil = 0; return false; }
     if (this.time < a.waitUntil) return true;
@@ -200,8 +248,10 @@ export class Simulation {
     this.buildHash();
     if ((this.routingDirty && this.tick % 10 === 0) || this.tick % 80 === 0) this.updateRouting();
     if (this.guards.length && (this.tick === 1 || this.tick % 10 === 0)) updateSecurity(this);
+    if (this.tick === 1 || this.tick % 20 === 0) updateSocial(this);
     for (const a of this.agents) {
       if (a.state === 'exited') continue;
+      updateStress(this, a, dt);
       a.rawContact = 0; a.ax = 0; a.ay = 0;
       if (!isMobile(a)) continue;
       const direction = this.navigate(a); a.trapped = direction.trapped;
@@ -219,6 +269,7 @@ export class Simulation {
       const forwardSpeed = a.vx * intent.x + a.vy * intent.y;
       const shove = (intent.shove || 0) * 18 * Math.max(0, 1 - Math.max(0, forwardSpeed) / Math.max(.1, intent.speed));
       a.ax += intent.x * shove; a.ay += intent.y * shove;
+      a.ax *= a.strength; a.ay *= a.strength;
     }
     for (const a of this.agents) {
       if (a.state === 'exited') continue;
@@ -233,7 +284,7 @@ export class Simulation {
         // Tangential body friction increases with compression, allowing transient clogs.
         const tangential = clamp(((b.vx - a.vx) * -ny + (b.vy - a.vy) * nx) * Math.max(0, overlap) * 700 * friction, -35, 35);
         const fx = nx * (repulsion + contact) - ny * tangential, fy = ny * (repulsion + contact) + nx * tangential;
-        a.ax += fx; a.ay += fy; b.ax -= fx; b.ay -= fy;
+        a.ax += fx / a.mass; a.ay += fy / a.mass; b.ax -= fx / b.mass; b.ay -= fy / b.mass;
         a.rawContact += contact; b.rawContact += contact;
       });
       for (const wall of this.solids) {
@@ -242,9 +293,9 @@ export class Simulation {
         const nx = dx / (d || 1), ny = dy / (d || 1), overlap = a.radius + .08 - d;
         const contact = Math.max(0, overlap) * 420;
         const force = 4 * Math.exp(clamp(overlap / .1, -10, 3)) + contact;
-        a.ax += nx * force; a.ay += ny * force; a.rawContact += contact;
+        a.ax += nx * force / a.mass; a.ay += ny * force / a.mass; a.rawContact += contact;
         const tangential = (a.vx * -ny + a.vy * nx) * Math.max(0, overlap) * 160 * friction;
-        a.ax += ny * tangential; a.ay -= nx * tangential;
+        a.ax += ny * tangential / a.mass; a.ay -= nx * tangential / a.mass;
       }
     }
     for (const a of this.agents) {
@@ -252,7 +303,7 @@ export class Simulation {
       // Dimensionless contact index. It is NOT force in newtons or pressure in pascals.
       a.contact += (clamp(a.rawContact / 120, 0, 1) - a.contact) * .12;
       if (this.settings.casualties) this.advanceHealth(a, dt);
-      updateDistress(a, dt, this.time, this.settings.panic);
+      updateDistress(a, dt, this.time, agentUrgency(this, a));
       if (!isMobile(a)) continue;
       const oldX = a.x, oldY = a.y;
       a.vx += clamp(a.ax, -100, 100) * dt; a.vy += clamp(a.ay, -100, 100) * dt;
@@ -295,5 +346,5 @@ export class Simulation {
   }
   get remaining() { return this.initialCount - this.evacuated - this.dead; }
   get complete() { return this.agents.every(a => a.state === 'exited' || a.state === 'dead'); }
-  snapshot() { return { model: 'crowd-lab-2.1', scenario: this.scenario, settings: { ...this.settings }, walls: structuredClone(this.walls), exits: structuredClone(this.exits), arrows: structuredClone(this.arrows), guards: this.guards.map(({ x, y }) => ({ x, y })), held: this.held, time: this.time, total: this.initialCount, evacuated: this.evacuated, fallen: this.fallen, injured: this.injured, dead: this.dead, recoveries: this.recoveries, trapped: this.trapped, peakContact: this.peakContact, peakDensity: this.peakDensity, exposure: this.exposure, history: this.history.map(v => ({ ...v })) }; }
+  snapshot() { return { model: 'crowd-lab-2.2', scenario: this.scenario, settings: { ...this.settings }, walls: structuredClone(this.walls), exits: structuredClone(this.exits), arrows: structuredClone(this.arrows), guards: this.guards.map(({ x, y }) => ({ x, y })), held: this.held, time: this.time, total: this.initialCount, evacuated: this.evacuated, fallen: this.fallen, injured: this.injured, dead: this.dead, recoveries: this.recoveries, trapped: this.trapped, peakContact: this.peakContact, peakDensity: this.peakDensity, exposure: this.exposure, history: this.history.map(v => ({ ...v })) }; }
 }

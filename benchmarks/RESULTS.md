@@ -1,6 +1,6 @@
 # Behavioral benchmark results
 
-Model 2.1, 9 October 2026. Baseline: commit `95c9a53` (model 1.6). These are synthetic plausibility/regression checks, **not empirical validation**.
+Model 2.2, 9 October 2026. Baseline: commit `95c9a53` (model 1.6). These are synthetic plausibility/regression checks, **not empirical validation**.
 
 ## Reproduce
 
@@ -9,7 +9,7 @@ node --test tests/*.test.js
 node benchmarks/run.js ./engine.js benchmarks/results.json
 ```
 
-Each condition uses 200 people, concert geometry, seeds 42 / 71 / 113, no companions, casualties disabled, and a 180-second limit. All 12 revised runs evacuated all 200 people. No throughput quota is imposed. The two urgent baseline rows are identical because that version has no cooperation control.
+Each condition uses 200 people, concert geometry, seeds 42 / 71 / 113, no companions, age variation 0%, casualties disabled, and a 180-second limit. All 12 revised runs evacuated all 200 people. No throughput quota is imposed. The two urgent baseline rows are identical because that version has no cooperation control.
 
 Central flow is 160 people divided by the interval between the 20th and 180th departures. Table values are means over three seeds; the range is the revised model’s minimum–maximum over those seeds. Contact is a dimensionless model proxy, not measured force.
 
@@ -22,7 +22,7 @@ Central flow is 160 people divided by the interval between the 20th and 180th de
 
 ## Interpretation
 
-- Below 90% urgency, model 2.0 movement is preserved. The user-selected 90%+ emergency regime deliberately weakens yielding and adds forward shoving force. Even high-cooperation runs now develop saturated contact. These high discharge rates are an uncalibrated extreme scenario, not predicted real-world capacity.
+- Without stress exposure and with age variation disabled, below 90% urgency model 2.0 movement is preserved. The user-selected 90%+ emergency regime deliberately weakens yielding and adds forward shoving force. Even high-cooperation runs now develop saturated contact. These high discharge rates are an uncalibrated extreme scenario, not predicted real-world capacity.
 - Doubling the calm exit width increased discharge flow in all three seeds. This is a directional check, not a calibration of flow per metre.
 - Lower-cooperation emergency runs clear faster in these synthetic runs; both cooperation extremes approach saturated contact. That is compatible with the existence of both faster-is-faster and faster-is-slower regimes in the literature; this suite does not establish that the model quantitatively reproduces either experiment.
 - Mean sampled low-density calm speed is approximately 1.22 m/s in the revised runs, versus 0.93 m/s before. Sampling uses moving people below 1/m², after their initial acceleration, during the first 10 seconds. This is not an isolated free-speed calibration.
@@ -30,9 +30,10 @@ Central flow is 160 people divided by the interval between the 20th and 180th de
 
 ## Other verification
 
-- 64 automated tests pass, including escalating emergency displacement of an inactive person, braking for fallen bodies, head-on passing without contact, queue braking, walls occluding observations, exit-switch hysteresis, group separation, exact staged release, delayed response, and severe-compression retreat at maximum urgency.
+- 78 automated tests pass, including escalating emergency displacement of an inactive person, braking for fallen bodies, head-on passing without contact, queue braking, walls occluding observations, exit-switch hysteresis, group separation, exact staged release, delayed response, and severe-compression retreat at maximum urgency.
+- Additional regressions cover age mix and vulnerability, contact-driven displacement, cooperation-dependent aid, occluded casualty awareness, safe assisted recovery, personal stress, arrow commitment and avoiding sign-induced reversals.
 - Existing tests cover graph reachability, concave barriers, cyclic signs, full evacuation without stranded walkers, conservation, deterministic seeding, recovery/casualty state accounting, guard metering and a 3,500-person stadium.
-- Model 2.0 browser checks covered new controls, saved-run restoration and model labels, Info links, narrow-screen layout and a running 3,500-person stadium. Model 2.1 additionally checks the 100% urgency concert scenario and browser error logs.
+- Model 2.0 browser checks covered new controls, saved-run restoration and model labels, Info links, narrow-screen layout and a running 3,500-person stadium. Model 2.2 additionally checks emergency behavior, the age control and saved setting, and browser error logs.
 
 ## Practical limits
 

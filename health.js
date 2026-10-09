@@ -4,7 +4,7 @@ export const isMobile = a => a.state === 'moving' || (a.state === 'injured' && !
 export function updateHealth(a, dt, rng, hasSpace) {
   if (a.state === 'dead' || a.state === 'exited') return false;
   const bad = a.contact > .62;
-  a.dose = Math.max(0, a.dose + (bad ? (a.contact - .62) * 4 : -.25) * dt);
+  a.dose = Math.max(0, a.dose + (bad ? (a.contact - .62) * 4 * (a.susceptibility ?? 1) : -.25) * dt);
   if (a.state === 'moving' && a.dose > 9) {
     a.state = 'fallen'; a.down = true; a.safeTime = 0; a.vx = a.vy = 0;
   } else if (a.state === 'fallen' && bad && a.dose > 18) {
@@ -19,7 +19,7 @@ export function updateHealth(a, dt, rng, hasSpace) {
   a.safeTime = improved ? (a.safeTime || 0) + dt : 0;
   if (a.safeTime < 2) return false;
   // A per-second hazard keeps recovery probability independent of rendering speed.
-  const rate = a.state === 'injured' ? .07 : .2;
+  const rate = (a.state === 'injured' ? .07 : .2) * (1 + .75 * Math.min(2, a.helpers || 0));
   if (rng() >= 1 - Math.exp(-rate * dt)) return false;
   if (a.state === 'fallen') a.state = 'moving';
   a.down = false; a.safeTime = 0; a.dose = Math.min(a.dose, a.state === 'injured' ? 12 : 3);
