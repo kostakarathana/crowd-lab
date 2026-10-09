@@ -43,14 +43,21 @@ test('staggered release delays activation independently of urgency', () => {
   advance(s, 5); assert.equal(s.agents.filter(a => a.start <= s.time).length, 26);
   assert.ok(s.agents[99].start > s.time);
 });
-test('extreme bottleneck contact produces exposure-based illustrative casualties', () => {
-  const s = advance(new Simulation('concert', { count: 700, panic: 100 }), 70);
+function confinedCrush(casualties) {
+  const walls = [{ ax: 10, ay: 10, bx: 14, by: 10 }, { ax: 14, ay: 10, bx: 14, by: 14 }, { ax: 14, ay: 14, bx: 10, by: 14 }, { ax: 10, ay: 14, bx: 10, by: 10 }];
+  const s = new Simulation('hall', { count: 140, panic: 100, casualties }, { walls, exits: [{ side: 'right', at: 15, width: 3 }] });
+  // An overcrowded enclosure leaves no open floor for the new escape response.
+  s.agents.forEach((a, i) => Object.assign(a, { x: 10.35 + (i % 12) * .3, y: 10.35 + Math.floor(i / 12) * .3, start: 0 }));
+  s.updateRouting(); return advance(s, 40);
+}
+test('inescapable compression still produces exposure-based illustrative casualties', () => {
+  const s = confinedCrush(true);
   assert.ok(s.peakContact > .8); assert.ok(s.dead + s.fallen + s.injured > 0);
   assert.equal(s.agents.filter(a => a.state === 'dead').length, s.dead);
   assert.equal(s.agents.filter(a => a.state === 'fallen').length, s.fallen);
 });
 test('casualty toggle disables falls and deaths under the same pressure', () => {
-  const s = advance(new Simulation('concert', { count: 700, panic: 100, casualties: false }), 70);
+  const s = confinedCrush(false);
   assert.ok(s.peakContact > .8); assert.equal(s.dead, 0); assert.equal(s.fallen, 0);
 });
 test('wider exits improve clearance in a controlled bottleneck experiment', () => {

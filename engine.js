@@ -1,3 +1,4 @@
+import { updateDistress, reliefDirection, cautiousPanic } from './escape.js';
 import { updateSecurity } from './security.js';
 import { canSeeSign, sightWalls, visibilityPolygon } from './visibility.js';
 import { FlowField, chooseArrow } from './navigation.js';
@@ -57,6 +58,10 @@ export class Simulation {
     const avoidance = .12 + 3.5 * (1 - this.settings.panic / 100) ** 2;
     for (let i = 0; i < costs.length; i++) { const p = this.field.center(i); costs[i] = 1 + Math.min(12, this.routeDensity(p.x, p.y) * avoidance); }
     this.field = new FlowField(this.w, this.h, this.solids, this.exits, { geometry: this.geometry, costs, obstacles });
+    if (this.agents.some(a => isMobile(a) && a.caution > .2)) {
+      const cautiousCosts = costs.map((cost, i) => { const p = this.field.center(i); return cost + Math.min(18, this.routeDensity(p.x, p.y) * 5); });
+      this.cautiousField = new FlowField(this.w, this.h, this.solids, this.exits, { geometry: this.geometry, costs: cautiousCosts, obstacles });
+    } else this.cautiousField = null;
     if (obstacles.length !== this.bodyCount || this.routingDirty) this.arrowFields.clear();
     this.bodyCount = obstacles.length; this.routingDirty = false; this.routeVersion++;
   }
@@ -88,13 +93,15 @@ export class Simulation {
       candidates.push({ index: i, density });
     }
     if (!candidates.length) return;
-    const choice = chooseArrow(candidates, this.navigationRng, this.settings.panic);
+    const choice = chooseArrow(candidates, this.navigationRng, cautiousPanic(this.settings.panic, a.caution));
     for (const c of candidates) { a.signMemory[c.index] = this.time + (choice ? 18 : 2 + this.navigationRng() * 2); if (choice) a.signVisited[c.index] = true; }
     if (choice) { a.arrow = choice.index; a.arrowUntil = this.time + 18; a.waypoint = null; }
     else a.nextSignRead = this.time + 2 + this.navigationRng() * 2;
   }
   navigate(a) {
-    if (this.time < a.start) return { x: 0, y: 0, trapped: false };
+    const relief = reliefDirection(this, a);
+    if (relief) return relief;
+    if (!a.escaping && this.time < a.start) return { x: 0, y: 0, trapped: false };
     // Progress is measured over time, so a jam isn't mistaken for a completed route.
     if (this.time >= a.progressAt) {
       const moved = Math.hypot(a.x - a.progressX, a.y - a.progressY);
@@ -102,13 +109,13 @@ export class Simulation {
       a.progressX = a.x; a.progressY = a.y; a.progressAt = this.time + 1;
       if (a.stalled >= 2) { a.waypoint = null; a.arrow = -1; a.nextSignRead = this.time + 6; }
     }
-    this.readArrows(a);
+    if (!a.escaping) this.readArrows(a);
     if (a.arrow >= 0) {
       const sign = this.arrows[a.arrow];
       if (this.time >= a.arrowUntil || Math.hypot(a.x - sign.bx, a.y - sign.by) < .8) { a.signMemory[a.arrow] = this.time + 20; a.arrow = -1; a.waypoint = null; }
     }
     if (!a.waypoint || this.time >= a.repathAt || a.routeVersion !== this.routeVersion || Math.hypot(a.x - a.waypoint.x, a.y - a.waypoint.y) < .35) {
-      const field = a.arrow >= 0 ? this.arrowField(a.arrow) : this.field;
+      const field = a.arrow >= 0 ? this.arrowField(a.arrow) : a.caution > .2 && this.cautiousField ? this.cautiousField : this.field;
       a.waypoint = field?.waypoint(a.x, a.y);
       if (!a.waypoint && a.arrow >= 0) { a.arrow = -1; a.waypoint = this.field.waypoint(a.x, a.y); }
       a.repathAt = this.time + .45 + a.hue * .2; a.routeVersion = this.routeVersion;
@@ -118,15 +125,17 @@ export class Simulation {
     return { x: dx / length, y: dy / length, trapped: false };
   }
   shouldWait(a, direction) {
-    const urgency = this.settings.panic / 100;
+    if (a.escaping) { a.waitUntil = 0; return false; }
+    if (this.time < a.regroupUntil && a.contact < .2 && a.density < 2) return true;
+    const urgency = cautiousPanic(this.settings.panic, a.caution) / 100;
     // Waiting is voluntary only in room to maneuver, not a freeze inside a crush.
     if (urgency >= .65 || a.contact > .2 || direction.trapped || this.time < a.start) { a.waitUntil = 0; return false; }
     if (this.time < a.waitUntil) return true;
     if (this.time < a.nextWaitCheck) return false;
     a.nextWaitCheck = this.time + 2 + a.hue * 2;
     const ahead = this.routeDensity(a.x + direction.x * 2.5, a.y + direction.y * 2.5), here = this.routeDensity(a.x, a.y);
-    const willing = a.hue < .8 * (1 - urgency) ** 2;
-    if (willing && ahead > 2.1 && ahead > here + .35 && here < 3 && Math.min(a.x, a.y, this.w - a.x, this.h - a.y) > 1) {
+    const willing = a.hue < Math.max(.8 * (1 - urgency) ** 2, a.caution * .9);
+    if (willing && ahead > 2.1 - a.caution * .6 && ahead > here + .35 && here < 3 && Math.min(a.x, a.y, this.w - a.x, this.h - a.y) > 1) {
       a.waitUntil = this.time + 2 + 4 * (1 - urgency) * a.factor;
       a.nextWaitCheck = a.waitUntil + 2; return true;
     }
@@ -148,7 +157,7 @@ export class Simulation {
       const p = cells[i]; this.agents.push({ id: i, x: p.x + (rng() - .5) * .10, y: p.y + (rng() - .5) * .10, vx: 0, vy: 0, ax: 0, ay: 0, radius: .215 + rng() * .035, factor: .7 + rng() * .6, start: this.settings.release ? i / this.settings.release : rng() * 2, state: 'moving', down: false, safeTime: 0, contact: 0, rawContact: 0, dose: 0, density: 0, trapped: false, hue: rng() });
     }
     this.initialCount = count;
-    for (const a of this.agents) Object.assign(a, { arrow: -1, arrowUntil: 0, nextSignRead: 0, signMemory: {}, signVisited: {}, waypoint: null, repathAt: 0, routeVersion: -1, progressAt: 1, progressX: a.x, progressY: a.y, stalled: 0, waitUntil: 0, nextWaitCheck: 0, waiting: false, securityHeld: false, securitySince: 0, securityCooldown: 0 });
+    for (const a of this.agents) Object.assign(a, { arrow: -1, arrowUntil: 0, nextSignRead: 0, signMemory: {}, signVisited: {}, waypoint: null, repathAt: 0, routeVersion: -1, progressAt: 1, progressX: a.x, progressY: a.y, stalled: 0, waitUntil: 0, nextWaitCheck: 0, waiting: false, securityHeld: false, securitySince: 0, securityCooldown: 0, contactBaseline: 0, distress: 0, caution: 0, lastCrush: 0, escaping: false, reliefTarget: null, reliefCheck: 0, reliefSafe: 0, regroupUntil: 0 });
   }
   buildHash() {
     this.hash.clear();
@@ -187,10 +196,10 @@ export class Simulation {
       a.rawContact = 0; a.ax = 0; a.ay = 0;
       if (!isMobile(a)) continue;
       const direction = this.navigate(a); a.trapped = direction.trapped;
-      if (a.contact > .35) a.securityHeld = false;
+      if (a.contact > .35 || a.escaping) a.securityHeld = false;
       a.waiting = a.securityHeld || this.shouldWait(a, direction);
       const variation = 1 + (a.factor - 1) * this.settings.variation / 35;
-      const desired = this.time >= a.start && !a.waiting ? (.95 + 3.5 * urgency * urgency) * variation * (a.state === 'injured' ? .55 : 1) : 0;
+      const desired = (this.time >= a.start || a.escaping) && !a.waiting ? (.95 + 3.5 * urgency * urgency) * variation * (a.state === 'injured' ? .55 : 1) : 0;
       a.ax = (direction.x * desired - a.vx) / .5;
       a.ay = (direction.y * desired - a.vy) / .5;
     }
@@ -226,6 +235,7 @@ export class Simulation {
       // Dimensionless contact index. It is NOT force in newtons or pressure in pascals.
       a.contact += (clamp(a.rawContact / 120, 0, 1) - a.contact) * .12;
       if (this.settings.casualties) this.advanceHealth(a, dt);
+      updateDistress(a, dt, this.time, this.settings.panic);
       if (!isMobile(a)) continue;
       const oldX = a.x, oldY = a.y;
       a.vx += clamp(a.ax, -100, 100) * dt; a.vy += clamp(a.ay, -100, 100) * dt;
@@ -244,7 +254,7 @@ export class Simulation {
       }
       if (a.x < 0 || a.x > this.w || a.y < 0 || a.y > this.h) {
         const index = this.exits.findIndex(e => { const horizontal = e.side === 'top' || e.side === 'bottom'; return (e.side === 'left' ? a.x < 0 : e.side === 'right' ? a.x > this.w : e.side === 'top' ? a.y < 0 : a.y > this.h) && Math.abs((horizontal ? a.x : a.y) - e.at) < e.width / 2; });
-        if (index >= 0) { if (a.state === 'injured') this.injured--; a.state = 'exited'; this.evacuated++; this.exitCounts[index]++; this.exitTimes.push(this.time); }
+        if (index >= 0) { if (a.state === 'injured') this.injured--; a.state = 'exited'; a.escaping = false; a.securityHeld = false; a.waiting = false; this.evacuated++; this.exitCounts[index]++; this.exitTimes.push(this.time); }
         else { a.x = clamp(a.x, .25, this.w - .25); a.y = clamp(a.y, .25, this.h - .25); a.vx = 0; a.vy = 0; }
       }
     }

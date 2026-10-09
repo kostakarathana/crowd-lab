@@ -34,7 +34,7 @@ export function updateSecurity(sim) {
     else if (guard.aheadDensity < 1.2 && downstreamContact < .2) guard.holding = false;
     if (!guard.holding) { guard.mode = relief ? 'relieving queue' : 'open'; continue; }
     const candidates = visible.filter(({ a }) => {
-      if (a.contact > .35 || sim.time < (a.securityCooldown || 0)) return false;
+      if (a.escaping || a.contact > .35 || sim.time < (a.securityCooldown || 0)) return false;
       if (previouslyHeld.has(a.id) && sim.time - a.securitySince >= 6) { a.securityCooldown = sim.time + 2; return false; }
       const route = a.waypoint || sim.field.waypoint(a.x, a.y);
       if (!route) return false;
