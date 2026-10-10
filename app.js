@@ -3,7 +3,7 @@ import { agentUrgency } from './social.js';
 import { drawPerson } from './people.js';
 import { guardCapacity } from './security.js';
 import { visibilityPolygon } from './visibility.js';
-import { Simulation, scenarios, defaults, DT, clamp, distanceToWall } from './engine.js';
+import { Simulation, scenarios, defaults, DT, clamp, distanceToWall, closest } from './engine.js';
 
 const $ = id => document.getElementById(id);
 const canvas = $('world'), ctx = canvas.getContext('2d'), chart = $('flow-chart'), chartCtx = chart.getContext('2d');
@@ -38,7 +38,7 @@ function restart(keepLayout = true) {
   updateSettingsUI(); updateUI(); draw();
 }
 function checkpoint() { undoStack.push(layout()); if (undoStack.length > 40) undoStack.shift(); $('undo').disabled = false; }
-function editLayout(mutator) { checkpoint(); mutator(); restart(); if (sim.trapped) toast(`${fmt(sim.trapped)} people have no route to an exit. Try opening the enclosure.`); }
+function editLayout(mutator) { checkpoint(); mutator(); restart(); }
 function setTool(next) {
   tool = next; drawing = null;
   document.querySelectorAll('[data-tool]').forEach(b => { const active = b.dataset.tool === tool; b.classList.toggle('active', active); b.setAttribute('aria-pressed', active); });
@@ -48,6 +48,7 @@ function setTool(next) {
 }
 function setRunning(next) {
   if (next && !sim.exits.length) { toast('Add an exit along the room’s edge first.'); return; }
+  if (next && !sim.initialCount) { toast('Open a path to an exit first.'); return; }
   if (next && sim.complete) restart();
   running = next; accumulator = 0; updateUI();
 }
@@ -65,6 +66,14 @@ function resize() {
 }
 function worldPoint(event) { const rect = canvas.getBoundingClientRect(); return { x: (event.clientX - rect.left - originX) / scale, y: (event.clientY - rect.top - originY) / scale }; }
 function clipped(p) { return { x: clamp(p.x, 0, sim.w), y: clamp(p.y, 0, sim.h) }; }
+function snapWallPoint(p) {
+  let best = clipped(p), distance = Math.min(.75, Math.max(.35, 6 / scale));
+  for (const wall of sim.solids) {
+    const q = closest(p.x, p.y, wall), d = Math.hypot(q.x - p.x, q.y - p.y);
+    if (d < distance) { best = q; distance = d; }
+  }
+  return best;
+}
 function snapped(p, shift) {
   p = clipped(p);
   if (shift && drawing) { const dx = p.x - drawing.start.x, dy = p.y - drawing.start.y, angle = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * Math.PI / 4, distance = Math.hypot(dx, dy); p = clipped({ x: drawing.start.x + Math.cos(angle) * distance, y: drawing.start.y + Math.sin(angle) * distance }); }
@@ -91,8 +100,10 @@ canvas.addEventListener('pointerdown', event => {
   if (event.button !== 0) return;
   canvas.focus({ preventScroll: true }); const p = worldPoint(event); canvas.setPointerCapture(event.pointerId);
   if (tool === 'wall' || tool === 'arrow') {
-    if (p.x < 0 || p.x > sim.w || p.y < 0 || p.y > sim.h) { toast('Start inside the venue.'); return; }
-    setRunning(false); drawing = { start: clipped(p), end: clipped(p) };
+    const margin = tool === 'wall' ? Math.min(.75, Math.max(.35, 6 / scale)) : 0;
+    if (p.x < -margin || p.x > sim.w + margin || p.y < -margin || p.y > sim.h + margin) { toast('Start inside the venue.'); return; }
+    const start = tool === 'wall' ? snapWallPoint(p) : clipped(p);
+    setRunning(false); drawing = { start, end: start };
   } else if (tool === 'security') {
     if (sim.guards.length >= 60) toast('60-guard limit reached.');
     else if (p.x < .4 || p.x > sim.w - .4 || p.y < .4 || p.y > sim.h - .4 || sim.solids.some(s => distanceToWall(p.x, p.y, s) < .4) || sim.field.nearest(p.x, p.y) < 0) toast('Place security in a clear, reachable area.');
@@ -110,7 +121,7 @@ canvas.addEventListener('pointerdown', event => {
 });
 canvas.addEventListener('pointermove', event => {
   const p = worldPoint(event);
-  if (drawing) { drawing.end = snapped(p, event.shiftKey); draw(); return; }
+  if (drawing) { const end = snapped(p, event.shiftKey); drawing.end = tool === 'wall' ? snapWallPoint(end) : end; draw(); return; }
   if (pointer) { panX = pointer.panX + event.clientX - pointer.x; panY = pointer.panY + event.clientY - pointer.y; transform(); draw(); return; }
   hovered = null;
   if (tool === 'inspect') {
@@ -211,8 +222,10 @@ function draw() {
   ctx.strokeStyle = '#63775026'; ctx.lineWidth = .6 / scale; ctx.beginPath();
   for (let x = 0; x <= sim.w; x += 5) { ctx.moveTo(x, 0); ctx.lineTo(x, sim.h); }
   for (let y = 0; y <= sim.h; y += 5) { ctx.moveTo(0, y); ctx.lineTo(sim.w, y); } ctx.stroke();
-  const excluded = scenarios[scenario].excluded;
-  if (excluded && sim.walls.length >= 4) { ctx.fillStyle = '#192922'; ctx.fillRect(excluded.x, excluded.y, excluded.w, excluded.h); ctx.strokeStyle = '#52664444'; ctx.lineWidth = .06; ctx.strokeRect(excluded.x + 1, excluded.y + 1, excluded.w - 2, excluded.h - 2); ctx.beginPath(); ctx.arc(excluded.x + excluded.w / 2, excluded.y + excluded.h / 2, 3, 0, Math.PI * 2); ctx.moveTo(excluded.x + excluded.w / 2, excluded.y + 1); ctx.lineTo(excluded.x + excluded.w / 2, excluded.y + excluded.h - 1); ctx.stroke(); }
+  ctx.fillStyle = '#192722'; ctx.beginPath();
+  const maskPad = .7 / scale;
+  for (const r of sim.voids) ctx.rect(r.x - maskPad, r.y - maskPad, r.w + maskPad * 2, r.h + maskPad * 2);
+  ctx.fill();
   // Decorative dashed apron makes door direction legible without motion.
   sim.exits.forEach(e => {
     ctx.save(); const horizontal = e.side === 'top' || e.side === 'bottom'; const x = horizontal ? e.at : e.side === 'left' ? 0 : sim.w, y = horizontal ? e.side === 'top' ? 0 : sim.h : e.at;
@@ -238,11 +251,11 @@ function draw() {
   }
   ctx.globalAlpha = 1;
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-  for (const wall of sim.solids) {
+  for (const wall of sim.displayWalls) {
     ctx.strokeStyle = '#0e1b15'; ctx.lineWidth = .32; ctx.beginPath(); ctx.moveTo(wall.ax, wall.ay); ctx.lineTo(wall.bx, wall.by); ctx.stroke();
     ctx.strokeStyle = '#96a97d'; ctx.lineWidth = .13; ctx.stroke();
   }
-  for (const wall of sim.walls) { ctx.fillStyle = '#c6d5aa'; ctx.beginPath(); ctx.arc(wall.ax, wall.ay, .15, 0, Math.PI * 2); ctx.arc(wall.bx, wall.by, .15, 0, Math.PI * 2); ctx.fill(); }
+  for (const wall of sim.walls) { if (wall.exterior || !sim.hasFloor) continue; ctx.fillStyle = '#c6d5aa'; ctx.beginPath(); ctx.arc(wall.ax, wall.ay, .15, 0, Math.PI * 2); ctx.arc(wall.bx, wall.by, .15, 0, Math.PI * 2); ctx.fill(); }
   for (const arrow of sim.arrows) drawArrow(arrow);
   for (const guard of sim.guards) {
     ctx.save(); ctx.translate(guard.x, guard.y);
@@ -282,15 +295,15 @@ function drawChart() {
   chartCtx.beginPath(); chartCtx.moveTo(0, height - 4); history.forEach(p => chartCtx.lineTo(x(p.time), y(p.flow))); chartCtx.strokeStyle = '#8aa764'; chartCtx.lineWidth = 1.6; chartCtx.stroke();
 }
 function updateUI() {
-  const state = sim.complete ? 'COMPLETE' : running ? 'RUNNING' : sim.time > 0 ? 'PAUSED' : 'READY';
+  const state = !sim.initialCount ? 'EMPTY' : sim.complete ? 'COMPLETE' : running ? 'RUNNING' : sim.time > 0 ? 'PAUSED' : 'READY';
   $('status-text').textContent = state; document.querySelector('.canvas-status').classList.toggle('running', running);
   $('play-icon').textContent = running ? 'Ⅱ' : '▶'; $('play-label').textContent = running ? 'Pause' : sim.complete ? 'Restart' : sim.time > 0 ? 'Resume' : 'Start';
   $('sim-time').textContent = timeLabel(sim.time); $('evacuated').textContent = fmt(sim.evacuated); $('total-count').textContent = `/ ${fmt(sim.initialCount)}`;
   $('flow').textContent = (sim.flow || 0).toFixed(1); $('density').textContent = sim.peakDensity.toFixed(1); $('fallen').textContent = fmt(sim.fallen); $('injured').textContent = fmt(sim.injured); $('dead').textContent = fmt(sim.dead);
-  $('evacuation-progress').style.width = `${sim.evacuated / sim.initialCount * 100}%`;
+  $('evacuation-progress').style.width = `${sim.evacuated / Math.max(1, sim.initialCount) * 100}%`;
   $('exit-info').textContent = `${sim.exits.length} exit${sim.exits.length === 1 ? '' : 's'}`;
-  $('route-warning').hidden = !sim.trapped;
-  $('route-warning').textContent = sim.trapped ? `${fmt(sim.trapped)} people have no route to an exit.` : '';
+  $('route-warning').hidden = sim.hasFloor && !sim.trapped;
+  $('route-warning').textContent = !sim.hasFloor ? 'Open a path to an exit to populate the room.' : sim.trapped ? `${fmt(sim.trapped)} people have no route to an exit.` : '';
   $('security-status').hidden = !sim.guards.length; $('security-status').textContent = `Security ${sim.guards.length} · holding ${sim.held}`;
   $('save-run').disabled = sim.time < 1;
   drawChart();
@@ -314,7 +327,7 @@ $('save-run').onclick = () => {
   renderRuns();
 };
 $('export-runs').onclick = () => {
-  const blob = new Blob([JSON.stringify({ model: 'crowd-lab-2.2', note: 'Qualitative uncalibrated model. Contact and casualty values are not real-world risk estimates.', runs: savedRuns }, null, 2)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify({ model: 'crowd-lab-2.3', note: 'Qualitative uncalibrated model. Contact and casualty values are not real-world risk estimates.', runs: savedRuns }, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = 'crowd-lab-experiments.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 function frame(now) {

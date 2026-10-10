@@ -30,7 +30,9 @@ Central flow is 160 people divided by the interval between the 20th and 180th de
 
 ## Other verification
 
-- 78 automated tests pass, including escalating emergency displacement of an inactive person, braking for fallen bodies, head-on passing without contact, queue braking, walls occluding observations, exit-switch hysteresis, group separation, exact staged release, delayed response, and severe-compression retreat at maximum urgency.
+Model 2.3 adds static venue normalization. The movement table above remains the model 2.2 benchmark; new layout regressions cover sealed regions, exact wall trimming, diagonal boundaries, reopening, snapshots, empty drafts and runtime casualty separation.
+
+- 88 automated tests pass, including escalating emergency displacement of an inactive person, braking for fallen bodies, head-on passing without contact, queue braking, walls occluding observations, exit-switch hysteresis, group separation, exact staged release, delayed response, and severe-compression retreat at maximum urgency.
 - Additional regressions cover age mix and vulnerability, contact-driven displacement, cooperation-dependent aid, occluded casualty awareness, safe assisted recovery, personal stress, arrow commitment and avoiding sign-induced reversals.
 - Existing tests cover graph reachability, concave barriers, cyclic signs, full evacuation without stranded walkers, conservation, deterministic seeding, recovery/casualty state accounting, guard metering and a 3,500-person stadium.
 - Model 2.0 browser checks covered new controls, saved-run restoration and model labels, Info links, narrow-screen layout and a running 3,500-person stadium. Model 2.2 additionally checks emergency behavior, the age control and saved setting, and browser error logs.

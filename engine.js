@@ -1,6 +1,7 @@
 import { initializeBehavior, planMotion, selectExit } from './behavior.js';
 import { initializeDemographics } from './demographics.js';
 import { agentUrgency, updateStress, updateSocial, aidDirection } from './social.js';
+import { resolveVenue } from './venue.js';
 import { updateDistress, reliefDirection, cautiousPanic, effectiveCaution, retreatTendency } from './escape.js';
 import { updateSecurity } from './security.js';
 import { canSeeSign, sightWalls, visibilityPolygon } from './visibility.js';
@@ -46,7 +47,15 @@ export class Simulation {
     this.navigationRng = random(this.settings.seed ^ 0x1234abcd); this.healthRng = random(this.settings.seed ^ 0x76543210); this.routeVersion = 0; this.bodyCount = 0; this.routingDirty = false;
     this.rebuild(); this.populate(); initializeDemographics(this, random(this.settings.seed ^ 0x239db571)); initializeBehavior(this, random(this.settings.seed ^ 0x45f839ac)); this.updateRouting(); this.measure();
   }
-  rebuild() { this.solids = [...boundaryWalls(this.w, this.h, this.exits), ...this.walls]; this.field = new FlowField(this.w, this.h, this.solids, this.exits); this.geometry = this.field.geometry; this.arrowFields = new Map(); this.signWalls = sightWalls(this.solids); this.signRanges = this.arrows.map(s => visibilityPolygon(s, this.signWalls)); }
+  rebuild() {
+    const venue = resolveVenue(this.w, this.h, boundaryWalls(this.w, this.h, this.exits), this.walls, this.exits);
+    this.walls = venue.walls; this.solids = venue.solids; this.displayWalls = venue.displayWalls;
+    this.voids = venue.voids; this.hasFloor = venue.hasFloor; this.designField = venue.field; this.geometry = venue.geometry;
+    this.field = new FlowField(this.w, this.h, this.solids, this.exits, { geometry: this.geometry });
+    this.arrows = this.arrows.filter(s => this.designField.nearest(s.ax, s.ay) >= 0);
+    this.guards = this.guards.filter(g => this.designField.nearest(g.x, g.y) >= 0);
+    this.arrowFields = new Map(); this.signWalls = sightWalls(this.solids); this.signRanges = this.arrows.map(s => visibilityPolygon(s, this.signWalls));
+  }
   updateRouting() {
     this.densityCols = Math.ceil(this.w / 1.5); this.densityRows = Math.ceil(this.h / 1.5);
     this.occupancy = new Float32Array(this.densityCols * this.densityRows);
@@ -198,15 +207,17 @@ export class Simulation {
     return false;
   }
   populate() {
-    const rng = random(this.settings.seed), cells = [], step = .57;
+    const rng = random(this.settings.seed), cells = [], overflow = [], step = .57;
     for (let y = .7; y < this.h - .6; y += step) for (let x = .7; x < this.w - 2; x += step) {
       const r = this.venue.excluded;
       if (r && x > r.x - .4 && x < r.x + r.w + .4 && y > r.y - .4 && y < r.y + r.h + .4) continue;
       if (this.solids.some(s => distanceToWall(x, y, s) < .38)) continue;
-      // The concourse starts upstream; arbitrary user enclosures still contain people.
-      if (this.scenario === 'concourse' && x > 40) continue;
+      if (this.field.nearest(x, y) < 0) continue;
+      // Prefer the upstream concourse, but relocate downstream if it is sealed.
+      if (this.scenario === 'concourse' && x > 40) { overflow.push({ x, y }); continue; }
       cells.push({ x, y });
     }
+    if (cells.length < this.settings.count) cells.push(...overflow);
     for (let i = cells.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [cells[i], cells[j]] = [cells[j], cells[i]]; }
     const count = Math.min(this.settings.count, cells.length);
     for (let i = 0; i < count; i++) {
@@ -345,6 +356,6 @@ export class Simulation {
     this.flow = recent / Math.max(.25, Math.min(this.time, 10));
   }
   get remaining() { return this.initialCount - this.evacuated - this.dead; }
-  get complete() { return this.agents.every(a => a.state === 'exited' || a.state === 'dead'); }
-  snapshot() { return { model: 'crowd-lab-2.2', scenario: this.scenario, settings: { ...this.settings }, walls: structuredClone(this.walls), exits: structuredClone(this.exits), arrows: structuredClone(this.arrows), guards: this.guards.map(({ x, y }) => ({ x, y })), held: this.held, time: this.time, total: this.initialCount, evacuated: this.evacuated, fallen: this.fallen, injured: this.injured, dead: this.dead, recoveries: this.recoveries, trapped: this.trapped, peakContact: this.peakContact, peakDensity: this.peakDensity, exposure: this.exposure, history: this.history.map(v => ({ ...v })) }; }
+  get complete() { return this.initialCount > 0 && this.agents.every(a => a.state === 'exited' || a.state === 'dead'); }
+  snapshot() { return { model: 'crowd-lab-2.3', scenario: this.scenario, settings: { ...this.settings }, walls: structuredClone(this.walls), exits: structuredClone(this.exits), arrows: structuredClone(this.arrows), guards: this.guards.map(({ x, y }) => ({ x, y })), held: this.held, time: this.time, total: this.initialCount, evacuated: this.evacuated, fallen: this.fallen, injured: this.injured, dead: this.dead, recoveries: this.recoveries, trapped: this.trapped, peakContact: this.peakContact, peakDensity: this.peakDensity, exposure: this.exposure, history: this.history.map(v => ({ ...v })) }; }
 }

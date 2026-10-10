@@ -1,6 +1,6 @@
 # Crowd Lab: evidence and model decisions
 
-Research revision: 9 October 2026. Model: `crowd-lab-2.2`.
+Research revision: 9 October 2026. Model: `crowd-lab-2.3`.
 
 This is a research-informed, browser-based agent simulation. It is **not a reproduction or validated combination of the papers below**, and it is not a trained neural network. Each person has a route, local perception, a sampled movement planner, individual traits, companions, memory, and behavioral states. These decisions run locally, with no API keys or external AI service.
 
@@ -93,6 +93,14 @@ Cooperation also controls attempts to aid visible casualties within 3.5 m. A see
 Within body radii plus 0.55 m, helpers multiply the existing recovery hazard by `1 + 0.75 × min(2, helpers)`. The original two seconds of relief, low density and physical room to stand are still required. Helpers do not carry people or guarantee recovery. Compression makes them abandon aid; high personal urgency sharply reduces willingness. Sight and aid assignment update every 0.5 s. See the existing Drury et al. source for evidence that helping occurs; these exact capacities, durations and recovery effects are scenario rules, not measured rescue efficacy.
 
 Every person has a separate arousal value from 0 to 1. Compression above contact 0.25, personal injury/falling, or visible casualties raises it; walls block casualty awareness. Target arousal is `min(1, 0.35 + 0.65 × threat)` while exposed, approached exponentially at `1 + threat` per second. Threat is the maximum of normalized compression, personal injury (1), and a visible casualty (0.6). Arousal falls by 0.025/s when above the current target. Personal urgency is `baseUrgency + (100 − baseUrgency) × arousal`, so the user's slider remains the baseline. Strong compression/injury can reach emergency shoving within seconds. Exposure weakens queue comparisons and voluntary waiting, increases exit commitment and preferred speed, reduces helping, and lowers nearby guard capacity. Severe distress can still trigger self-preservation. This is the requested stress response, not a universal claim that real emergencies eliminate rational thought.
+
+## Venue design normalization (model 2.3)
+
+After a layout edit/reset, a static navigation flood from the exits determines usable floor. Spawn cells are restricted to reachable space, redistributing the requested crowd there up to the available non-overlapping spawn capacity. An upstream concourse with no room to spawn can use reachable downstream floor. No usable exit means an empty editable draft, not trapped people.
+
+Wall drawing snaps endpoints to nearby boundaries. Walls are split at exact segment intersections (or nearby endpoint projections for imported gaps too narrow for a body). Pieces with no reachable side are removed; pieces with one reachable side are exterior boundaries. Both-sided pieces remain internal barriers. The original straight/diagonal geometry is retained, with reachability evaluated using the existing 0.5 m navigation grid and body clearance. Sealed floor is shaded out using that grid. Hidden guards/signs are removed. Undo retains the prior layout; erased boundaries and new exits recompute usable floor. Empty drafts keep their drawing geometry so they can be repaired.
+
+This happens only at setup. Temporary obstruction by casualties never teleports agents or erases the venue during a run. Regions too narrow for the navigation clearance count as solid. Existing exits remain on the original venue edges. This is an editor rule, not a change to human behavior.
 
 ## Verification and limits
 

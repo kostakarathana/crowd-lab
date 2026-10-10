@@ -27,16 +27,15 @@ test('routes go around a partial barrier but not a complete partition', () => {
   assert.ok(!partial.direction(2, 4).trapped); assert.ok(closed.direction(2, 4).trapped);
   assert.ok(partial.direction(4, 4).y > 0);
 });
-test('agents cannot cross a sealed wall at maximum urgency', () => {
+test('people spawn on the exit side of a sealed wall and cannot cross back at maximum urgency', () => {
   const s = new Simulation('hall', { count: 100, panic: 100, casualties: false }, { walls: [{ ax: 24, ay: 0, bx: 24, by: 30 }], exits: [{ side: 'right', at: 15, width: 2 }] });
-  const left = s.agents.filter(a => a.x < 24).map(a => a.id);
+  assert.equal(s.initialCount, 100); assert.ok(s.agents.every(a => a.x > 24));
   advance(s, 25);
-  for (const id of left) { assert.ok(s.agents[id].x < 24); assert.notEqual(s.agents[id].state, 'exited'); }
-  assert.ok(s.trapped >= left.length);
+  assert.ok(s.agents.every(a => a.x > 24)); assert.equal(s.trapped, 0);
 });
-test('no exits means no evacuation and every agent has a blocked route', () => {
+test('a room with no exits stays empty until a usable exit is added', () => {
   const s = advance(new Simulation('hall', { count: 100 }, { walls: [], exits: [] }), 5);
-  assert.equal(s.evacuated, 0); assert.equal(s.trapped, 100); assert.ok(!s.complete);
+  assert.equal(s.evacuated, 0); assert.equal(s.trapped, 0); assert.equal(s.initialCount, 0); assert.ok(!s.complete);
 });
 test('staggered release delays activation independently of urgency', () => {
   const s = new Simulation('hall', { count: 100, panic: 100, release: 5 });
