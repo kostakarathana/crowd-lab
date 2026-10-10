@@ -1,4 +1,5 @@
 import { isMobile } from './health.js';
+import { perceivedDensity } from './cognition.js';
 
 // Illustrative responses to the model's contact index, not psychological calibration.
 export const retreatTendency = panic => .12 + .88 * Math.max(0, Math.min(1, (100 - panic) / 70)) ** 2;
@@ -38,14 +39,14 @@ export function reliefDirection(sim, a) {
   if (a.reliefTarget && !sim.field.clear(a.x, a.y, a.reliefTarget.x, a.reliefTarget.y)) { a.reliefTarget = null; a.reliefCheck = 0; }
   if (sim.time >= a.reliefCheck || (a.reliefTarget && Math.hypot(a.x - a.reliefTarget.x, a.y - a.reliefTarget.y) < .4)) {
     a.reliefCheck = sim.time + .6 + a.hue * .3;
-    const here = sim.routeDensity(a.x, a.y); let best = null, score = Infinity;
+    const here = perceivedDensity(sim, a, a.x, a.y) ?? a.density; let best = null, score = Infinity;
     // Search sidewards and backwards too. Visible, walkable segments cannot cross walls.
     for (const radius of [1.5, 3, 4.5]) for (let i = 0; i < 16; i++) {
       const angle = (i + a.hue) * Math.PI / 8, x = a.x + Math.cos(angle) * radius, y = a.y + Math.sin(angle) * radius;
       if (x < .4 || y < .4 || x > sim.w - .4 || y > sim.h - .4) continue;
-      const density = sim.routeDensity(x, y);
-      if (density > here - .2 || !sim.field.clear(a.x, a.y, x, y)) continue;
-      const pathDensity = Math.max(...[.33, .67].map(t => sim.routeDensity(a.x + (x - a.x) * t, a.y + (y - a.y) * t)));
+      const density = perceivedDensity(sim, a, x, y);
+      if (density == null || density > here - .2 || !sim.field.clear(a.x, a.y, x, y)) continue;
+      const pathDensity = Math.max(...[.33, .67].map(t => perceivedDensity(sim, a, a.x + (x - a.x) * t, a.y + (y - a.y) * t) ?? here));
       if (pathDensity > here + .4) continue;
       const continuity = a.reliefTarget ? Math.min(2, Math.hypot(x - a.reliefTarget.x, y - a.reliefTarget.y)) * .08 : 0;
       const cost = density * 2 + pathDensity * .6 + radius * .045 + continuity;

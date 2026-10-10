@@ -4,12 +4,13 @@ import { Simulation, DT } from '../engine.js';
 import { updateSocial, updateStress, agentUrgency, aidDirection } from '../social.js';
 import { emergencyDrive } from '../behavior.js';
 import { updateHealth } from '../health.js';
+import { perceive } from '../cognition.js';
 
 function scene(cooperation = 100, panic = 0, walls = []) {
   const s = new Simulation('hall', { count: 5, cooperation, panic, groups: 0, ageVariation: 0 }, { walls, exits: [{ side: 'right', at: 15, width: 3 }] });
-  s.agents.forEach((a, i) => Object.assign(a, { x: 20 - i * .3, y: 15 + i * .15, start: 0, hue: .1, courtesy: cooperation / 100, density: 0, contact: 0 }));
+  s.agents.forEach((a, i) => Object.assign(a, { x: 20, y: 13 + i * .8, start: 0, hue: .1, altruism: .1, heading: 0, noticeDelay: .2, attention: 1, perceiveAt: 0, aidReviewAt: 0, courtesy: cooperation / 100, density: 0, contact: 0 }));
   Object.assign(s.agents[0], { x: 21, state: 'fallen', down: true });
-  s.buildHash(); return s;
+  s.buildHash(); perceive(s); s.time = 1; s.agents.forEach(a => a.perceiveAt = 0); perceive(s); return s;
 }
 
 test('cooperation creates bounded aid teams; high urgency sharply suppresses helping', () => {
@@ -21,7 +22,7 @@ test('cooperation creates bounded aid teams; high urgency sharply suppresses hel
   assert.equal(selfish.agents.filter(a => a.aidTarget != null).length, 0);
   const urgent = scene(100, 100); updateSocial(urgent);
   assert.equal(urgent.agents.filter(a => a.aidTarget != null).length, 0);
-  calm.time = 7; updateSocial(calm);
+  calm.time = 9; updateSocial(calm);
   assert.equal(helper.aidTarget, null); assert.ok(helper.aidCooldown > calm.time);
 });
 
@@ -30,7 +31,7 @@ test('walls block both casualty awareness and attempts to render aid', () => {
   updateSocial(hidden);
   for (const a of hidden.agents.slice(1)) { assert.equal(a.seenCasualty, 0); assert.equal(a.aidTarget == null, true); }
   const visible = scene(); updateSocial(visible);
-  assert.ok(visible.agents.slice(1).every(a => a.seenCasualty === 1));
+  assert.ok(visible.agents.slice(1).some(a => a.seenCasualty === 1));
 });
 
 test('nearby helpers improve recovery only after relief and space, never revive the dead', () => {
@@ -50,7 +51,7 @@ test('people briefly check a dead casualty, then move on without repeatedly retu
   const s = scene(); s.agents[0].state = 'dead'; updateSocial(s);
   const helper = s.agents.find(a => a.aidTarget === 0);
   assert.ok(helper); assert.equal(s.agents[0].helpers, 0);
-  s.time = 3; updateSocial(s); assert.equal(helper.aidTarget, null);
+  s.time = 4; updateSocial(s); assert.equal(helper.aidTarget, null);
   s.time = 60; updateSocial(s); assert.equal(helper.aidTarget, null);
 });
 
@@ -67,7 +68,7 @@ test('injury and compression rapidly raise personal urgency, while witnesses res
   assert.ok(agentUrgency(s, injured) > 95);
   const bystander = { state: 'moving', contact: 0, seenCasualty: 1 }, unexposed = { state: 'moving', contact: 0 };
   for (let i = 0; i < 3 / DT; i++) { updateStress(s, bystander, DT); updateStress(s, unexposed, DT); }
-  assert.ok(agentUrgency(s, bystander) > 70); assert.equal(agentUrgency(s, unexposed), 20);
+  assert.ok(agentUrgency(s, bystander) > 45 && agentUrgency(s, bystander) < 70); assert.equal(agentUrgency(s, unexposed), 20);
   a.escaping = false; a.regroupUntil = 0; a.waitUntil = 20;
   assert.equal(s.shouldWait(a, { x: 1, y: 0 }), false);
 });

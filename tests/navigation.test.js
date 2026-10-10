@@ -98,9 +98,9 @@ test('brief congestion does not cancel arrow commitment, but an unresolved jam h
 
 test('calm agents wait before a dense queue, panic reduces waiting, and waits expire', () => {
   const s = new Simulation('hall', { count: 100, panic: 0, casualties: false });
-  s.occupancy.fill(0);
-  for (let y = 7; y <= 13; y++) for (let x = 13; x <= 17; x++) s.occupancy[y * s.densityCols + x] = 9;
   s.time = 10;
+  // A remembered visible queue rather than omniscient occupancy data.
+  s.agents.forEach(a => Object.assign(a, { perceivedAt: 10, observedAround: true, perceivedNeighbors: Array.from({ length: 25 }, (_, i) => ({ x: 19 + i % 5 * .2, y: 14.6 + Math.floor(i / 5) * .2 })) }));
   const sample = panic => { s.settings.panic = panic; let n = 0; for (const a of s.agents) { Object.assign(a, { x: 17, y: 15, start: 0, waitUntil: 0, nextWaitCheck: 0, contact: 0 }); if (s.shouldWait(a, { x: 1, y: 0 })) n++; } return n; };
   const calm = sample(0), moderate = sample(40), panic = sample(100);
   assert.ok(calm > 60); assert.ok(moderate < calm && moderate > 5); assert.equal(panic, 0);

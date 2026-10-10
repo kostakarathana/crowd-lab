@@ -2,6 +2,7 @@ import { initializeBehavior, planMotion, selectExit } from './behavior.js';
 import { initializeDemographics } from './demographics.js';
 import { agentUrgency, updateStress, updateSocial, aidDirection } from './social.js';
 import { resolveVenue } from './venue.js';
+import { initializeCognition, perceive, believedRoute, personalRandom, perceivedDensity } from './cognition.js';
 import { updateDistress, reliefDirection, cautiousPanic, effectiveCaution, retreatTendency } from './escape.js';
 import { updateSecurity } from './security.js';
 import { canSeeSign, sightWalls, visibilityPolygon } from './visibility.js';
@@ -45,7 +46,7 @@ export class Simulation {
     this.time = 0; this.tick = 0; this.evacuated = 0; this.fallen = 0; this.injured = 0; this.dead = 0; this.recoveries = 0; this.trapped = 0; this.peakContact = 0; this.peakDensity = 0; this.exposure = 0;
     this.history = []; this.exitTimes = []; this.exitCounts = this.exits.map(() => 0); this.agents = []; this.hash = new Map(); this.bucketSize = 1.2;
     this.navigationRng = random(this.settings.seed ^ 0x1234abcd); this.healthRng = random(this.settings.seed ^ 0x76543210); this.routeVersion = 0; this.bodyCount = 0; this.routingDirty = false;
-    this.rebuild(); this.populate(); initializeDemographics(this, random(this.settings.seed ^ 0x239db571)); initializeBehavior(this, random(this.settings.seed ^ 0x45f839ac)); this.updateRouting(); this.measure();
+    this.rebuild(); this.populate(); initializeDemographics(this, random(this.settings.seed ^ 0x239db571)); initializeBehavior(this, random(this.settings.seed ^ 0x45f839ac)); initializeCognition(this, random(this.settings.seed ^ 0x7a09e631)); this.updateRouting(); this.measure();
   }
   rebuild() {
     const venue = resolveVenue(this.w, this.h, boundaryWalls(this.w, this.h, this.exits), this.walls, this.exits);
@@ -74,11 +75,9 @@ export class Simulation {
       const cautiousCosts = costs.map((cost, i) => { const p = this.field.center(i); return cost + Math.min(18, this.routeDensity(p.x, p.y) * 5 * retreatTendency(this.settings.panic)); });
       this.cautiousField = new FlowField(this.w, this.h, this.solids, this.exits, { geometry: this.geometry, costs: cautiousCosts, obstacles });
     } else this.cautiousField = null;
-    if (!this.exitFields || obstacles.length !== this.bodyCount || this.routingDirty) {
-      this.arrowFields.clear();
-      this.exitFields = this.exits.map(exit => new FlowField(this.w, this.h, this.solids, [exit], { geometry: this.geometry, obstacles }));
-      for (const a of this.agents) a.exitReview = 0;
-    }
+    // These are maps of permanent architecture. A casualty is learned locally,
+    // never broadcast through a rebuilt exit field or a global decision reset.
+    if (!this.exitFields) this.exitFields = this.exits.map(exit => new FlowField(this.w, this.h, this.solids, [exit], { geometry: this.geometry }));
     this.bodyCount = obstacles.length; this.routingDirty = false; this.routeVersion++;
   }
   routeDensity(x, y) {
@@ -89,14 +88,14 @@ export class Simulation {
   arrowField(index) {
     if (!this.arrowFields.has(index)) {
       const sign = this.arrows[index];
-      const goal = this.field.nearest(sign.bx, sign.by);
-      this.arrowFields.set(index, goal < 0 ? null : new FlowField(this.w, this.h, this.solids, [], { geometry: this.geometry, obstacles: this.field.obstacles, goals: [this.field.center(goal)] }));
+      const goal = this.designField.nearest(sign.bx, sign.by);
+      this.arrowFields.set(index, goal < 0 ? null : new FlowField(this.w, this.h, this.solids, [], { geometry: this.geometry, goals: [this.designField.center(goal)] }));
     }
     return this.arrowFields.get(index);
   }
   readArrows(a) {
     if (a.arrow >= 0 || this.time < a.nextSignRead || a.stalled > 2) return;
-    a.nextSignRead = this.time + .7;
+    a.nextSignRead = this.time + .45 + personalRandom(a) * .55;
     const candidates = [];
     for (let i = 0; i < this.arrows.length; i++) {
       const s = this.arrows[i];
@@ -110,7 +109,8 @@ export class Simulation {
       const field = this.arrowField(i);
       if (!field || field.nearest(a.x, a.y) < 0) continue;
       // Sample the indicated corridor, not just the shared location of two signs.
-      const density = [.45, .75, 1].reduce((sum, t) => sum + this.routeDensity(s.ax + (s.bx - s.ax) * t, s.ay + (s.by - s.ay) * t), 0) / 3;
+      const samples = [.45, .75, 1].map(t => perceivedDensity(this, a, s.ax + (s.bx - s.ax) * t, s.ay + (s.by - s.ay) * t)).filter(d => d != null);
+      const density = samples.length ? samples.reduce((sum, d) => sum + d, 0) / samples.length : a.density;
       candidates.push({ index: i, density });
     }
     if (!candidates.length) return;
@@ -175,11 +175,11 @@ export class Simulation {
         else this.finishArrow(a, false);
       }
     }
-    if (!a.waypoint || this.time >= a.repathAt || a.routeVersion !== this.routeVersion || Math.hypot(a.x - a.waypoint.x, a.y - a.waypoint.y) < .35) {
-      const field = a.arrow >= 0 ? this.arrowField(a.arrow) : this.exitFields[a.exitChoice] || this.field;
+    if (!a.waypoint || this.time >= a.repathAt || Math.hypot(a.x - a.waypoint.x, a.y - a.waypoint.y) < .35) {
+      const field = believedRoute(this, a, a.exitChoice, a.arrow);
       a.waypoint = field?.waypoint(a.x, a.y);
-      if (!a.waypoint && a.arrow >= 0) { a.arrow = -1; a.waypoint = this.field.waypoint(a.x, a.y); }
-      a.repathAt = this.time + .45 + a.hue * .2; a.routeVersion = this.routeVersion;
+      if (!a.waypoint && a.arrow >= 0) { a.arrow = -1; a.waypoint = believedRoute(this, a)?.waypoint(a.x, a.y); }
+      a.repathAt = this.time + .4 + personalRandom(a) * .4;
     }
     if (!a.waypoint) return { x: 0, y: 0, trapped: true };
     const dx = a.waypoint.x - a.x, dy = a.waypoint.y - a.y, length = Math.hypot(dx, dy) || 1;
@@ -197,11 +197,12 @@ export class Simulation {
     if (urgency >= .65 || a.contact > .2 || direction.trapped || this.time < a.start) { a.waitUntil = 0; return false; }
     if (this.time < a.waitUntil) return true;
     if (this.time < a.nextWaitCheck) return false;
-    a.nextWaitCheck = this.time + 2 + a.hue * 2;
-    const ahead = this.routeDensity(a.x + direction.x * 2.5, a.y + direction.y * 2.5), here = this.routeDensity(a.x, a.y);
+    a.nextWaitCheck = this.time + (1.5 + personalRandom(a) * 2) * a.patience;
+    const ahead = perceivedDensity(this, a, a.x + direction.x * 2.5, a.y + direction.y * 2.5), here = perceivedDensity(this, a, a.x, a.y) ?? a.density;
+    if (ahead == null) return false;
     const willing = a.hue < Math.max(.8 * (1 - urgency) ** 2, caution * .9);
     if (willing && ahead > 2.1 - caution * .6 && ahead > here + .35 && here < 3 && Math.min(a.x, a.y, this.w - a.x, this.h - a.y) > 1) {
-      a.waitUntil = this.time + 2 + 4 * (1 - urgency) * a.factor;
+      a.waitUntil = this.time + (1.5 + 4 * (1 - urgency) * a.factor) * a.patience;
       a.nextWaitCheck = a.waitUntil + 2; return true;
     }
     return false;
@@ -255,11 +256,12 @@ export class Simulation {
   step() {
     const dt = DT;
     this.tick++; this.time = this.tick * DT;
+    this.beliefBuilds = 0;
     const urgency = this.settings.panic / 100, friction = this.settings.friction / 100;
     this.buildHash();
     if ((this.routingDirty && this.tick % 10 === 0) || this.tick % 80 === 0) this.updateRouting();
     if (this.guards.length && (this.tick === 1 || this.tick % 10 === 0)) updateSecurity(this);
-    if (this.tick === 1 || this.tick % 20 === 0) updateSocial(this);
+    perceive(this); updateSocial(this);
     for (const a of this.agents) {
       if (a.state === 'exited') continue;
       updateStress(this, a, dt);
@@ -271,7 +273,7 @@ export class Simulation {
       const active = (this.time >= a.start || a.escaping) && !a.waiting;
       if (active && (this.time >= a.decisionAt || !a.intent)) {
         a.intent = planMotion(this, a, direction);
-        a.decisionAt = this.time + .15 + (a.id % 3) * DT;
+        a.decisionAt = this.time + a.decisionInterval * (.85 + personalRandom(a) * .3);
       }
       if (!active) { a.intent = null; a.yielding = false; a.accompanying = false; }
       const intent = active && a.intent ? a.intent : { x: 0, y: 0, speed: 0 };
@@ -345,7 +347,7 @@ export class Simulation {
     for (const a of this.agents) {
       if (a.state === 'exited') continue;
       let neighbors = 0;
-      this.neighbors(a, b => { if ((a.x - b.x) ** 2 + (a.y - b.y) ** 2 <= 1) neighbors++; });
+      this.neighbors(a, b => { if ((a.x - b.x) ** 2 + (a.y - b.y) ** 2 <= 1 && visibleSegment(a.x, a.y, b.x, b.y, this.walls, .01)) neighbors++; });
       a.density = neighbors / Math.PI;
       this.maxDensity = Math.max(this.maxDensity, a.density); this.maxContact = Math.max(this.maxContact, a.contact);
       if (a.contact > .62) { this.atRisk++; this.exposure += .25; }
@@ -357,5 +359,5 @@ export class Simulation {
   }
   get remaining() { return this.initialCount - this.evacuated - this.dead; }
   get complete() { return this.initialCount > 0 && this.agents.every(a => a.state === 'exited' || a.state === 'dead'); }
-  snapshot() { return { model: 'crowd-lab-2.3', scenario: this.scenario, settings: { ...this.settings }, walls: structuredClone(this.walls), exits: structuredClone(this.exits), arrows: structuredClone(this.arrows), guards: this.guards.map(({ x, y }) => ({ x, y })), held: this.held, time: this.time, total: this.initialCount, evacuated: this.evacuated, fallen: this.fallen, injured: this.injured, dead: this.dead, recoveries: this.recoveries, trapped: this.trapped, peakContact: this.peakContact, peakDensity: this.peakDensity, exposure: this.exposure, history: this.history.map(v => ({ ...v })) }; }
+  snapshot() { return { model: 'crowd-lab-2.4', scenario: this.scenario, settings: { ...this.settings }, walls: structuredClone(this.walls), exits: structuredClone(this.exits), arrows: structuredClone(this.arrows), guards: this.guards.map(({ x, y }) => ({ x, y })), held: this.held, time: this.time, total: this.initialCount, evacuated: this.evacuated, fallen: this.fallen, injured: this.injured, dead: this.dead, recoveries: this.recoveries, trapped: this.trapped, peakContact: this.peakContact, peakDensity: this.peakDensity, exposure: this.exposure, history: this.history.map(v => ({ ...v })) }; }
 }

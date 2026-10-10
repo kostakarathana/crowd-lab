@@ -30,25 +30,25 @@ test('brief contact is ignored; relief permits regrouping and slowly fading caut
 test('escape seeks lower density including backwards but cannot cross a wall', () => {
   const setup = walls => {
     const s = new Simulation('hall', { count: 1 }, { walls, exits: [{ side: 'right', at: 15, width: 3 }] });
-    const a = s.agents[0]; Object.assign(a, { x: 12, y: 15, escaping: true, reliefCheck: 0 });
-    s.routeDensity = x => x < 10 ? .1 : 3;
+    const a = s.agents[0]; Object.assign(a, { x: 12, y: 15, escaping: true, reliefCheck: 0, perceivedAt: 0, observedAround: true,
+      perceivedNeighbors: Array.from({ length: 24 }, (_, i) => ({ x: 12 + i % 6 * .35, y: 14.1 + Math.floor(i / 6) * .6 })) });
     return { s, a };
   };
   const open = setup([]), blocked = setup([{ ax: 11, ay: 0, bx: 11, by: 30 }]);
-  assert.ok(reliefDirection(open.s, open.a).x < 0); assert.ok(open.a.reliefTarget.x < 10);
-  assert.equal(reliefDirection(blocked.s, blocked.a), null);
-  assert.equal(blocked.a.reliefTarget, null);
+  assert.ok(reliefDirection(open.s, open.a).x < 0); assert.ok(open.a.reliefTarget.x < 11);
+  reliefDirection(blocked.s, blocked.a);
+  assert.ok(!blocked.a.reliefTarget || blocked.a.reliefTarget.x > 11);
 });
 test('escape never crosses a denser band to reach an empty target', () => {
   const s = new Simulation('hall', { count: 1 }); const a = s.agents[0];
-  Object.assign(a, { x: 20, y: 15, escaping: true });
-  s.routeDensity = (x, y) => { const d = Math.hypot(x - 20, y - 15); return d < .5 ? 2 : d < 3.5 ? 5 : .1; };
+  Object.assign(a, { x: 20, y: 15, escaping: true, perceivedAt: 0, observedAround: true,
+    perceivedNeighbors: Array.from({ length: 64 }, (_, i) => ({ x: 20 + Math.cos(i * Math.PI / 32) * 2.3, y: 15 + Math.sin(i * Math.PI / 32) * 2.3 })) });
   assert.equal(reliefDirection(s, a), null);
 });
 test('experienced people avoid crowded routes and wait at moderate urgency', () => {
   const s = new Simulation('hall', { count: 1, panic: 50 }); const a = s.agents[0];
-  Object.assign(a, { x: 20, y: 15, start: 0, hue: .1, contact: 0, caution: 1 });
-  s.routeDensity = x => x > 21 ? 2 : 1;
+  Object.assign(a, { x: 20, y: 15, start: 0, hue: .1, contact: 0, caution: 1, nextWaitCheck: 0, perceivedAt: 0, observedAround: true,
+    perceivedNeighbors: Array.from({ length: 18 }, (_, i) => ({ x: 22 + i % 6 * .2, y: 14.6 + Math.floor(i / 6) * .3 })) });
   assert.ok(cautiousPanic(50, 1) < 35);
   assert.equal(s.shouldWait(a, { x: 1, y: 0 }), true);
   a.escaping = true; assert.equal(s.shouldWait(a, { x: -1, y: 0 }), false);

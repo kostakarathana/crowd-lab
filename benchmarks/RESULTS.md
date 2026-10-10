@@ -28,11 +28,28 @@ Central flow is 160 people divided by the interval between the 20th and 180th de
 - Mean sampled low-density calm speed is approximately 1.22 m/s in the revised runs, versus 0.93 m/s before. Sampling uses moving people below 1/m², after their initial acceleration, during the first 10 seconds. This is not an isolated free-speed calibration.
 - Different preferred speeds, planning, exit decisions and cooperation changed together. The before/after comparison cannot isolate the causal contribution of one feature.
 
+## Model 2.4 cognition regression (10 October 2026)
+
+The original model 2.2 comparison above is retained as historical data. The same 12 scenarios were rerun after adding individual perception and decision clocks. All 12 evacuated all 200 people with casualties disabled.
+
+| Condition | Mean central flow (people/s) | Mean clearance (s) | Mean peak contact |
+|---|---:|---:|---:|
+| Calm, cooperation 75% | 1.82 | 114.8 | 0.039 |
+| Urgency 100%, cooperation 100% | 11.33 | 24.3 | 0.999 |
+| Urgency 100%, cooperation 0% | 16.84 | 19.0 | 0.995 |
+| Calm, wider exit | 3.86 | 58.3 | 0.030 |
+
+Data: [model 2.4 results](cognition-results.json). Extreme emergency flow/contact remains an uncalibrated game regime. These checks establish neither human-level intelligence nor empirical safety accuracy.
+
+Nine added cognition regressions test: identical unaware-agent trajectories with/without a distant casualty; varied recognition times and stress; wall-blocked awareness/aid/warnings; facing direction and body occlusion; private remembered obstacle locations and expiry; delayed, attenuating warnings; perception iteration-order independence; reproducible individual random streams; and nearby, recent, unobstructed density observations. Existing queue/aid/retreat fixtures now provide observations instead of assuming instantaneous awareness. Full suite: 97 passed.
+
+Browser verification covers a running 1,400-person emergency scenario, the individual inspection readout, updated research information, and browser error logs. The 3,500-person stadium remains covered by finite-state and conservation tests.
+
 ## Other verification
 
 Model 2.3 adds static venue normalization. The movement table above remains the model 2.2 benchmark; new layout regressions cover sealed regions, exact wall trimming, diagonal boundaries, reopening, snapshots, empty drafts and runtime casualty separation.
 
-- 88 automated tests pass, including escalating emergency displacement of an inactive person, braking for fallen bodies, head-on passing without contact, queue braking, walls occluding observations, exit-switch hysteresis, group separation, exact staged release, delayed response, and severe-compression retreat at maximum urgency.
+- 97 automated tests pass, including escalating emergency displacement of an inactive person, braking for fallen bodies, head-on passing without contact, queue braking, walls occluding observations, exit-switch hysteresis, group separation, exact staged release, delayed response, and severe-compression retreat at maximum urgency.
 - Additional regressions cover age mix and vulnerability, contact-driven displacement, cooperation-dependent aid, occluded casualty awareness, safe assisted recovery, personal stress, arrow commitment and avoiding sign-induced reversals.
 - Existing tests cover graph reachability, concave barriers, cyclic signs, full evacuation without stranded walkers, conservation, deterministic seeding, recovery/casualty state accounting, guard metering and a 3,500-person stadium.
 - Model 2.0 browser checks covered new controls, saved-run restoration and model labels, Info links, narrow-screen layout and a running 3,500-person stadium. Model 2.2 additionally checks emergency behavior, the age control and saved setting, and browser error logs.

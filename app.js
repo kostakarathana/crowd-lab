@@ -134,7 +134,7 @@ canvas.addEventListener('pointermove', event => {
     $('inspection').hidden = false;
   } else if (hovered) {
     const state = hovered.state === 'moving' ? hovered.escaping ? 'Seeking open space' : hovered.aidTarget != null ? (hovered.aiding ? 'Giving aid' : 'Approaching casualty') : sim.time < hovered.regroupUntil ? 'Regrouping' : hovered.trapped ? 'No route to exit' : sim.time < hovered.start ? 'Waiting for release' : hovered.securityHeld ? 'Held by security' : hovered.waiting ? 'Waiting for space' : hovered.yielding ? 'Slowing for traffic' : hovered.accompanying ? 'Keeping with companions' : hovered.arrow >= 0 ? 'Following exit arrow' : effectiveCaution(settings.panic, hovered.caution) > .2 ? 'Avoiding crowds' : 'Moving to exit' : hovered.state === 'fallen' ? 'Fallen' : hovered.state === 'injured' ? hovered.down ? 'Injured · down' : hovered.escaping ? 'Injured · seeking open space' : 'Injured · walking' : 'Dead';
-    $('inspection').innerHTML = `<b>PERSON ${hovered.id + 1} · ${state}</b>Age ${hovered.age} · Urgency ${Math.round(agentUrgency(sim, hovered))}%<br>Local density ${hovered.density.toFixed(1)} people / m²<br>Contact index ${Math.round(hovered.contact * 100)}% · Speed ${Math.hypot(hovered.vx, hovered.vy).toFixed(1)} m/s`;
+    $('inspection').innerHTML = `<b>PERSON ${hovered.id + 1} · ${state}</b>Age ${hovered.age} · Urgency ${Math.round(agentUrgency(sim, hovered))}%<br>Known casualties ${Object.keys(hovered.noticed || {}).length} · Stress ${Math.round((hovered.arousal || 0) * 100)}%<br>Local density ${hovered.density.toFixed(1)} people / m²<br>Contact index ${Math.round(hovered.contact * 100)}% · Speed ${Math.hypot(hovered.vx, hovered.vy).toFixed(1)} m/s`;
     $('inspection').hidden = false;
   } else $('inspection').hidden = true;
   if (!running) draw();
@@ -327,7 +327,7 @@ $('save-run').onclick = () => {
   renderRuns();
 };
 $('export-runs').onclick = () => {
-  const blob = new Blob([JSON.stringify({ model: 'crowd-lab-2.3', note: 'Qualitative uncalibrated model. Contact and casualty values are not real-world risk estimates.', runs: savedRuns }, null, 2)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify({ model: 'crowd-lab-2.4', note: 'Qualitative uncalibrated model. Contact and casualty values are not real-world risk estimates.', runs: savedRuns }, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = 'crowd-lab-experiments.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 function frame(now) {

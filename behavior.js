@@ -1,6 +1,7 @@
 import { isMobile } from './health.js';
 import { visibleSegment } from './navigation.js';
 import { agentUrgency } from './social.js';
+import { personalRandom, believedRoute } from './cognition.js';
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const angles = [0, -.25, .25, -.5, .5, -.8, .8, -1.1, 1.1];
@@ -92,7 +93,7 @@ export function planMotion(sim, a, route) {
   const direction = route.helping ? { ...route, pace: .65 } : companionPreference(sim, a, route);
   const urgency = agentUrgency(sim, a) / 100, speed = preferredSpeed(sim, a) * direction.pace;
   const emergency = emergencyDrive(sim, a);
-  const horizon = (2.4 - .7 * urgency) * (1 - .45 * emergency);
+  const horizon = (2.4 - .7 * urgency) * (1 - .45 * emergency) * (.85 + .3 * (a.attention ?? .5));
   const reach = Math.min(6, Math.max(3, speed * horizon));
   const neighbors = [];
   sim.neighbors(a, b => {
@@ -131,7 +132,7 @@ export function planMotion(sim, a, route) {
     const score = (1 - Math.cos(angle)) * 1.4 + Math.abs(angle - a.turn) * .12
       + (speed - Math.min(speed, allowed)) / speed
       + (collision < horizon ? .9 * (1 - .8 * emergency) * (1 - collision / horizon) : 0)
-      + (angle < 0 ? .004 : 0);
+      + angle * (a.sidePreference ?? .08) * .025;
     if (score < bestScore) { bestScore = score; best = { x: dx, y: dy, speed: Math.max(0, allowed), angle }; }
   }
   // At a tight corner the graph waypoint is safer than an arbitrary sampled turn.
@@ -153,10 +154,10 @@ export function exitPosition(sim, exit, inset = .6) {
 // the floor plan itself is still assumed known, explicitly documented in Info.
 export function selectExit(sim, a) {
   if (sim.time < a.exitReview && a.exitChoice >= 0) return;
-  a.exitReview = sim.time + 2 + a.response * 2 + 4 * (a.arousal || 0);
+  a.exitReview = sim.time + (1.8 + personalRandom(a) * 2 + 2 * (a.arousal || 0)) / (a.adaptability ?? 1);
   const options = [], speed = preferredSpeed(sim, a), urgency = agentUrgency(sim, a) / 100;
   for (let i = 0; i < sim.exits.length; i++) {
-    const field = sim.exitFields[i], cell = field.nearest(a.x, a.y);
+    const field = believedRoute(sim, a, i), cell = field.nearest(a.x, a.y);
     if (cell < 0) continue;
     const e = sim.exits[i], p = exitPosition(sim, e);
     if (Math.hypot(a.x - p.x, a.y - p.y) <= 14 && visibleSegment(a.x, a.y, p.x, p.y, sim.solids, .06)) {
@@ -168,13 +169,22 @@ export function selectExit(sim, a) {
       a.exitMemory[i] = { at: sim.time, delay: count / Math.max(.5, e.width * (1 + Math.min(1, sumSpeed / Math.max(1, count)))) };
     }
     const memory = a.exitMemory[i], remembered = memory ? memory.delay * Math.exp(-(sim.time - memory.at) / 15) : 0;
-    const cost = field.distance[cell] * field.cell / speed + remembered * (1 - .5 * urgency) * (1 - .8 * (a.arousal || 0)) + (a.exitBias[i] || 0);
+    // Infer others' direction from observed motion, never read their exitChoice.
+    const dx = p.x - a.x, dy = p.y - a.y, distance = Math.hypot(dx, dy) || 1;
+    let following = 0, peers = 0;
+    for (const b of a.perceivedNeighbors || []) {
+      const v = Math.hypot(b.vx, b.vy);
+      if (v < .25 || sim.time - b.at > 2) continue;
+      following += Math.max(0, (b.vx * dx + b.vy * dy) / (v * distance)); peers++;
+    }
+    const socialCue = peers ? following / peers * (a.socialTrust ?? .5) * .8 : 0;
+    const cost = field.distance[cell] * field.cell / speed + remembered * (1 - .5 * urgency) * (1 - .65 * (a.arousal || 0)) * (a.patience ?? 1) + (a.exitBias[i] || 0) - socialCue;
     options.push({ index: i, cost });
   }
   options.sort((x, y) => x.cost - y.cost);
   const best = options[0], current = options.find(o => o.index === a.exitChoice);
   if (!best) { a.exitChoice = -1; return; }
-  const switchCost = 2 + 5 * urgency;
+  const switchCost = (2 + 5 * urgency) / (a.adaptability ?? 1);
   if (!current || (sim.time >= a.exitCommitted && best.cost + switchCost < current.cost)) {
     if (a.exitChoice >= 0 && a.exitChoice !== best.index) a.routeChanges++;
     a.exitChoice = best.index; a.exitCommitted = sim.time + 5 + 7 * urgency; a.waypoint = null;
